@@ -238,8 +238,7 @@ class HackEEGBoard:
             print(f"command: {command}  parameters: {parameters}")
         # commands are only sent in JSON Lines mode
         new_command_obj = {self.CommandKey: command, self.ParametersKey: parameters}
-        # new_command = json.dumps(new_command_obj)
-        new_command = str(json.dumps(new_command_obj)) # EXTREMELY IMPORTANT: convert to string, otherwise does not work
+        new_command = json.dumps(new_command_obj)
         if self.debug:
             print("json command:")
             print(self.format_json(new_command_obj))
