@@ -3,6 +3,7 @@
 
 SERIAL_PORT_PATH="/dev/cu.usbmodem14434401"  # your actual path to the Arduino Native serial port device goes here
 import os.path
+from pathlib import Path
 import sys
 import time
 import warnings
@@ -10,7 +11,7 @@ import warnings
 import serial
 import serial.tools.list_ports
 
-sys.path.insert(1, os.path.abspath('C:/Users/leofo/OneDrive - McGill University/Documents McGill/Github/hackeeg-client-python-singleboard/'))
+sys.path.insert(1, Path(__file__).resolve().parents[1])
 import hackeeg
 from hackeeg import ads1299
 # import hackeeg_exp as hackeeg
