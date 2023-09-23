@@ -11,10 +11,10 @@ import serial
 import serial.tools.list_ports
 
 sys.path.insert(1, os.path.abspath('C:/Users/leofo/OneDrive - McGill University/Documents McGill/Github/hackeeg-client-python-singleboard/'))
-# import hackeeg
-# from hackeeg import ads1299
-import hackeeg_exp as hackeeg
-from hackeeg_exp import ads1299
+import hackeeg
+from hackeeg import ads1299
+# import hackeeg_exp as hackeeg
+# from hackeeg_exp import ads1299
 
 arduino_ports = [
     p.device

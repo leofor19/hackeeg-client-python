@@ -79,8 +79,8 @@ class HackEEGBoard:
             self.raw_serial_port = serial.serial_for_url(serial_port_path, baudrate=self.baudrate, timeout=0.1)
             print(self.raw_serial_port)
             self.raw_serial_port.reset_input_buffer()
-            # self.serial_port= self.raw_serial_port
-            self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
+            self.serial_port= self.raw_serial_port
+            # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
             # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port, 1), encoding='utf-8')
             # print(self.serial_port)
             # self.serial_port = io.TextIOWrapper(io.BufferedRandom(self.raw_serial_port))
@@ -116,9 +116,38 @@ class HackEEGBoard:
         while line:
             line = self.serial_port.readline()
 
+    # def connect(self):
+    #     # self.mode = self._sense_protocol_mode()
+    #     # if self.mode == self.TextMode:
+    #     #     attempts = 0
+    #     #     connected = False
+    #     #     while attempts < self.MaxConnectionAttempts:
+    #     try:
+    #         self.jsonlines_mode()
+    #         connected = True
+    #     except JSONDecodeError:
+    #         if attempts == 0:
+    #             print("Connecting...", end='')
+    #         elif attempts > 0:
+    #             print('.', end='')
+    #         sys.stdout.flush()
+    #         attempts += 1
+    #         time.sleep(self.ConnectionSleepTime)
+    #     # if attempts > 0:
+    #     #     print()
+    #     # if not connected:
+    #     #     raise HackEEGException("Can't connect to Arduino")
+    #     self.sdatac()
+    #     line = self.serial_port.readline()
+    #     while line:
+    #         line = self.serial_port.readline()
+
     def _serial_write(self, command):
-        self.serial_port.write(command)
-        # self.serial_port.write(command.encode())
+        # self.serial_port.write(command)
+        if isinstance(command, str):
+            self.serial_port.write(command.encode())
+        else:
+            self.serial_port.write(command)
         self.serial_port.flush()
 
     # def _serial_write(self, command, serial_port='raw'):
@@ -128,12 +157,12 @@ class HackEEGBoard:
     #         self.serial_port.write(command)
     #     self.serial_port.flush()
 
-    def _serial_readline(self, serial_port=None):
-    # def _serial_readline(self, serial_port='raw'):
+    # def _serial_readline(self, serial_port=None):
+    def _serial_readline(self, serial_port='raw'):
         if serial_port is None:
             line = self.serial_port.readline()
         elif serial_port == "raw":
-            line = str(self.raw_serial_port.readline())
+            line = self.raw_serial_port.readline().decode()
         else:
             raise HackEEGException('Unknown serial port designator; must be either None or "raw"')
         return line
@@ -149,6 +178,7 @@ class HackEEGBoard:
         The format is:
         1100 + LOFF_STATP[0:7] + LOFF_STATN[0:7] + bits[4:7] of the GPIOregister"""
         error = False
+        print(response)
         if response:
             data = response.get(self.DataKey)
             if data is None:
@@ -192,8 +222,8 @@ class HackEEGBoard:
     def set_debug(self, debug):
         self.debug = debug
 
-    def read_response(self, serial_port=None):
-    # def read_response(self, serial_port='raw'):
+    # def read_response(self, serial_port=None):
+    def read_response(self, serial_port='raw'):
         """read a response from the Arduino– must be in JSON Lines mode"""
         message = self._serial_readline(serial_port=serial_port)
         try:
@@ -238,8 +268,8 @@ class HackEEGBoard:
             print(f"command: {command}  parameters: {parameters}")
         # commands are only sent in JSON Lines mode
         new_command_obj = {self.CommandKey: command, self.ParametersKey: parameters}
-        # new_command = json.dumps(new_command_obj)
         new_command = str(json.dumps(new_command_obj)) # EXTREMELY IMPORTANT: convert to string, otherwise does not work
+        # print(new_command)
         if self.debug:
             print("json command:")
             print(self.format_json(new_command_obj))
@@ -247,10 +277,11 @@ class HackEEGBoard:
         self._serial_write('\n')
 
     def send_text_command(self, command):
-        self._serial_write(command + '\n')
+        new = command + '\n'
+        self._serial_write(new.encode())
 
-    def execute_command(self, command, parameters=None, serial_port=None):
-    # def execute_command(self, command, parameters=None, serial_port='raw'):
+    # def execute_command(self, command, parameters=None, serial_port=None):
+    def execute_command(self, command, parameters=None, serial_port='raw'):
         if parameters is None:
             parameters = []
         self.send_command(command, parameters)
@@ -262,7 +293,8 @@ class HackEEGBoard:
             self.send_command("stop")
             self.send_command("sdatac")
             result = self.execute_command("nop")
-            return self.JsonLinesMode
+            if self.ok(result):
+                return self.JsonLinesMode
         except Exception:
             return self.TextMode
 
