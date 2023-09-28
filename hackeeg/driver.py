@@ -1,12 +1,18 @@
 import base64
 import binascii
+from datetime import datetime
 import io
 import json
 import sys
 from json import JSONDecodeError
+import os
+from pathlib import Path
+import warnings
 
 import msgpack
+import pandas as pd
 import serial
+import serial.tools.list_ports
 import time
 
 from . import ads1299
@@ -68,26 +74,38 @@ class HackEEGBoard:
     MaxConnectionAttempts = 10
     ConnectionSleepTime = 0.1
 
-    def __init__(self, serial_port_path=None, baudrate=DEFAULT_BAUDRATE, debug=False):
+    def __init__(self, serial_port_path=None, baudrate=DEFAULT_BAUDRATE, debug=False, quiet=True,
+                 max_samples=100000, duration=1, target_mode=2, speed=16000):
         self.mode = None
+        self.target_mode = target_mode
         self.message_pack_unpacker = None
         self.debug = debug
+        self.quiet = quiet
         self.baudrate = baudrate
         self.rdatac_mode = False
-        self.serial_port_path = serial_port_path
-        if serial_port_path:
-            self.raw_serial_port = serial.serial_for_url(serial_port_path, baudrate=self.baudrate, timeout=0.1)
+        self.max_samples = max_samples
+        self.duration = duration
+        self.default_filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_data'))
+        self.speed = 16000
+
+        if serial_port_path is None:
+            self.serial_port_path = self.locate_arduino_port()
+        else:
+            self.serial_port_path = serial_port_path
+        self.raw_serial_port = serial.serial_for_url(self.serial_port_path, baudrate=self.baudrate, timeout=0.1)
+        if self.debug:
+            print('Connected to Serial Port:')
             print(self.raw_serial_port)
-            self.raw_serial_port.reset_input_buffer()
-            self.serial_port= self.raw_serial_port
-            # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
-            # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port, 1), encoding='utf-8')
-            # print(self.serial_port)
-            # self.serial_port = io.TextIOWrapper(io.BufferedRandom(self.raw_serial_port))
-            # self.serial_port = io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port)
-            # self.binaryBufferedSerialPort = io.BufferedReader(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
-            # self.message_pack_unpacker = msgpack.Unpacker(self.binaryBufferedSerialPort, raw=False, use_list=False)
-            self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port, raw=False, use_list=False)
+        self.raw_serial_port.reset_input_buffer()
+        self.serial_port= self.raw_serial_port
+        # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
+        # self.serial_port = io.TextIOWrapper(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port, 1), encoding='utf-8')
+        # print(self.serial_port)
+        # self.serial_port = io.TextIOWrapper(io.BufferedRandom(self.raw_serial_port))
+        # self.serial_port = io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port)
+        # self.binaryBufferedSerialPort = io.BufferedReader(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
+        # self.message_pack_unpacker = msgpack.Unpacker(self.binaryBufferedSerialPort, raw=False, use_list=False)
+        self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port, raw=False, use_list=False)
 
     def connect(self):
         self.mode = self._sense_protocol_mode()
@@ -96,8 +114,13 @@ class HackEEGBoard:
             connected = False
             while attempts < self.MaxConnectionAttempts:
                 try:
-                    self.jsonlines_mode()
+                    if self.target_mode == 2:
+                        self.messagepack_mode()
+                    else:
+                        self.jsonlines_mode()
                     connected = True
+                    # sample_mode = ads1299.HIGH_RES_16k_SPS | ads1299.CONFIG1_const
+                    # self.wreg(ads1299.CONFIG1, sample_mode)
                     break
                 except JSONDecodeError:
                     if attempts == 0:
@@ -178,45 +201,50 @@ class HackEEGBoard:
         The format is:
         1100 + LOFF_STATP[0:7] + LOFF_STATN[0:7] + bits[4:7] of the GPIOregister"""
         error = False
-        print(response)
+        if (not self.quiet) or (self.debug):
+            print(response)
         if response:
-            data = response.get(self.DataKey)
-            if data is None:
-                data = response.get(self.MpDataKey)
-                if type(data) is str:
-                    try:
-                        data = base64.b64decode(data)
-                    except binascii.Error:
-                        print(f"incorrect padding: {data}")
+            if isinstance(response, dict):
+                data = response.get(self.DataKey)
+                if data is None:
+                    data = response.get(self.MpDataKey)
+                    # if type(data) is str:
+                    if isinstance(data, str):
+                        try:
+                            data = base64.b64decode(data)
+                        except binascii.Error:
+                            print(f"incorrect padding: {data}")
+                # if data and (type(data) is list) or (type(data) is bytes):
+                if data and (isinstance(data, list) or isinstance(data, bytes)):
+                    data_hex = ":".join("{:02x}".format(c) for c in data)
+                    if error:
+                        print(data_hex)
+                    timestamp = int.from_bytes(data[0:4], byteorder='little')
+                    sample_number = int.from_bytes(data[4:8], byteorder='little')
+                    ads_status = int.from_bytes(data[8:11], byteorder='big')
+                    ads_gpio = ads_status & 0x0f
+                    loff_statn = (ads_status >> 4) & 0xff
+                    loff_statp = (ads_status >> 12) & 0xff
+                    extra = (ads_status >> 20) & 0xff
 
-            if data and (type(data) is list or type(data) is bytes):
-                data_hex = ":".join("{:02x}".format(c) for c in data)
-                if error:
-                    print(data_hex)
-                timestamp = int.from_bytes(data[0:4], byteorder='little')
-                sample_number = int.from_bytes(data[4:8], byteorder='little')
-                ads_status = int.from_bytes(data[8:11], byteorder='big')
-                ads_gpio = ads_status & 0x0f
-                loff_statn = (ads_status >> 4) & 0xff
-                loff_statp = (ads_status >> 12) & 0xff
-                extra = (ads_status >> 20) & 0xff
+                    channel_data = []
+                    for channel in range(0, 8):
+                        channel_offset = 11 + (channel * 3)
+                        sample = int.from_bytes(data[channel_offset:channel_offset + 3], byteorder='big', signed=True)
+                        channel_data.append(sample)
 
-                channel_data = []
-                for channel in range(0, 8):
-                    channel_offset = 11 + (channel * 3)
-                    sample = int.from_bytes(data[channel_offset:channel_offset + 3], byteorder='big', signed=True)
-                    channel_data.append(sample)
-
-                response['timestamp'] = timestamp
-                response['sample_number'] = sample_number
-                response['ads_status'] = ads_status
-                response['ads_gpio'] = ads_gpio
-                response['loff_statn'] = loff_statn
-                response['loff_statp'] = loff_statp
-                response['extra'] = extra
-                response['channel_data'] = channel_data
-                response['data_hex'] = data_hex
-                response['data_raw'] = data
+                    response['timestamp'] = timestamp
+                    response['sample_number'] = sample_number
+                    response['ads_status'] = ads_status
+                    response['ads_gpio'] = ads_gpio
+                    response['loff_statn'] = loff_statn
+                    response['loff_statp'] = loff_statp
+                    response['extra'] = extra
+                    response['channel_data'] = channel_data
+                    response['data_hex'] = data_hex
+                    response['data_raw'] = data
+            else:
+                response = data
         return response
 
     def set_debug(self, debug):
@@ -428,3 +456,118 @@ class HackEEGBoard:
         self.execute_command("boardledon")
         time.sleep(0.3)
         self.execute_command("boardledoff")
+
+    def locate_arduino_port(self):
+        arduino_ports = [
+        p.device for p in serial.tools.list_ports.comports() if 'Arduino' in p.description  # may need tweaking to match new arduinos
+        ]
+
+        if not arduino_ports:
+            raise IOError("No Arduino found")
+        if len(arduino_ports) > 1:
+            warnings.warn('Multiple Arduinos found - using the first')
+
+        return arduino_ports[0]
+
+    def process_sample(self, result, samples, outhex=False):
+        data = None
+        channel_data = None
+        if result:
+            # raw = result
+            # result = self._decode_data(result)
+            status_code = result.get(self.MpStatusCodeKey)
+            data = result.get(self.MpDataKey)
+            samples.append(result)
+            if status_code == Status.Ok and data:
+                if not self.quiet:
+                    timestamp = result.get('timestamp')
+                    sample_number = result.get('sample_number')
+                    ads_gpio = result.get('ads_gpio')
+                    loff_statp = result.get('loff_statp')
+                    loff_statn = result.get('loff_statn')
+                    channel_data = result.get('channel_data')
+                    data_hex = result.get('data_hex')
+                    print(
+                        f"timestamp:{timestamp} sample_number: {sample_number}| gpio:{ads_gpio} loff_statp:{loff_statp} loff_statn:{loff_statn}   ",
+                        end='')
+                    if outhex:
+                        print(data_hex)
+                    for channel_number, sample in enumerate(channel_data):
+                        print(f"{channel_number + 1}:{sample} ", end='')
+                    print()
+                # else:
+                #     for channel_number, sample in enumerate(channel_data):
+                #         print(f"{channel_number + 1}:{sample} ", end='')
+                #     print()
+            else:
+                if not self.quiet:
+                    print(data)
+        else:
+            print("no data to decode")
+            print(f"result: {result}")
+
+    def save2csv(self, data, filepath=None):
+        if filepath is None:
+            filepath = self.default_filepath
+        if ~filepath.endswith('.csv'):
+            filepath = "".join((filepath.rstrip('/'), '.csv'))
+        if not os.path.exists(os.path.dirname(filepath)):
+            os.makedirs(os.path.dirname(filepath))
+        pd.DataFrame(data).to_csv(filepath)
+
+    def save2parquet(self, data, filepath=None, parquet_engine='pyarrow'):
+        if filepath is None:
+            filepath = self.default_filepath
+        if ~filepath.endswith('.parquet'):
+            filepath = "".join((filepath.rstrip('/'), '.parquet'))
+        if not os.path.exists(os.path.dirname(filepath)):
+            os.makedirs(os.path.dirname(filepath))
+        if parquet_engine == 'pyarrow':
+            pd.DataFrame(data).to_parquet(filepath, engine=parquet_engine, index= False)
+        else:
+            pd.DataFrame(data).to_parquet(filepath, engine=parquet_engine, object_encoding='utf8', write_index= False)
+
+    def main(self, max_samples=None, duration=None, speed=None):
+
+        if max_samples is None:
+            max_samples = self.max_samples
+
+        if duration is None:
+            duration = self.duration
+
+        if speed is None:
+            speed = self.speed
+
+        max_sample_time = duration * speed
+        print(max_sample_time)
+
+        samples = []
+        sample_counter = 0
+        clock = 0
+
+        end_time = time.perf_counter()
+        start_time = time.perf_counter()
+        while ((sample_counter < max_samples) and (sample_counter < max_sample_time)):
+            result = self.read_rdatac_response()
+            end_time = time.perf_counter()
+            sample_counter += 1
+            # if self.continuous_mode:
+            #     self.read_keyboard_input()
+            if self.mode == 2:
+                samples.append(result)
+            else:
+                self.process_sample(result, samples)
+
+        dur = end_time - start_time
+        self.stop_and_sdatac_messagepack()
+        self.blink_board_led()
+
+        # print(pd.DataFrame(samples))
+        self.save2csv(samples)
+        self.save2parquet(samples)
+
+        print(f"duration in seconds: {dur}")
+        samples_per_second = sample_counter / dur
+        print(f"samples per second: {samples_per_second}")
+        # dropped_samples = self.find_dropped_samples(samples, sample_counter)
+        # print(f"dropped samples: {dropped_samples}")
