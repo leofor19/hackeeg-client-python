@@ -2,7 +2,9 @@
 # This is the example used in the documentation.
 
 SERIAL_PORT_PATH="/dev/cu.usbmodem14434401"  # your actual path to the Arduino Native serial port device goes here
+import os
 import sys
+sys.path.insert(1, os.path.dirname(os.path.abspath(__file__)))
 
 import hackeeg
 from hackeeg import ads1299

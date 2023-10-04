@@ -64,7 +64,7 @@ try:
     # print('mode:', hackeeg.mode)
     hackeeg.messagepack_mode()
     # print('mode:', hackeeg.mode)
-    hackeeg.main(duration=0.1, speed=250)
+    hackeeg.main(duration=1, speed=250)
     # hackeeg.wreg(ads1299.CH7SET, ads1299.TEST_SIGNAL | ads1299.GAIN_1X)
     # # hackeeg.rreg(ads1299.CH7SET)
 

@@ -209,7 +209,8 @@ class HackEEGBoard:
                 if data is None:
                     data = response.get(self.MpDataKey)
                     # if type(data) is str:
-                    if isinstance(data, str):
+                    # if isinstance(data, str) or isinstance(data, bytes):
+                    if self._isBase64(data):
                         try:
                             data = base64.b64decode(data)
                         except binascii.Error:
@@ -243,8 +244,6 @@ class HackEEGBoard:
                     response['channel_data'] = channel_data
                     response['data_hex'] = data_hex
                     response['data_raw'] = data
-            else:
-                response = data
         return response
 
     def set_debug(self, debug):
@@ -468,6 +467,38 @@ class HackEEGBoard:
             warnings.warn('Multiple Arduinos found - using the first')
 
         return arduino_ports[0]
+
+    def _isBase64(self, sb):
+        """Identifies if input is Base64 encoded, returns bool.
+
+        From: https://stackoverflow.com/questions/12315398/check-if-a-string-is-encoded-in-base64-using-python
+
+        Parameters
+        ----------
+        sb : any
+           input to determine whether Base64 encoded
+
+        Returns
+        -------
+        bool
+            'True' if input is string or byte with Base64 encoding, otherwise returns 'False'
+
+        Raises
+        ------
+        ValueError
+            "Argument must be string or bytes"
+        """
+        try:
+            if isinstance(sb, str):
+                # If there's any unicode here, an exception will be thrown and the function will return false
+                sb_bytes = bytes(sb, 'ascii')
+            elif isinstance(sb, bytes):
+                sb_bytes = sb
+            else:
+                raise ValueError("Argument must be string or bytes")
+            return base64.b64encode(base64.b64decode(sb_bytes)) == sb_bytes
+        except Exception:
+            return False
 
     def process_sample(self, result, samples, outhex=False):
         data = None
