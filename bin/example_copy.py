@@ -11,8 +11,8 @@ import warnings
 import serial
 import serial.tools.list_ports
 
-sys.path.insert(1, Path(__file__).resolve().parents[1])
-import hackeeg
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from hackeeg import HackEEGBoard
 from hackeeg import ads1299
 # import hackeeg_exp as hackeeg
 # from hackeeg_exp import ads1299
@@ -30,7 +30,7 @@ if len(arduino_ports) > 1:
 # print(arduino_ports)
 SERIAL_PORT_PATH = arduino_ports[0]
 
-hackeeg = hackeeg.HackEEGBoard(SERIAL_PORT_PATH, debug=False)
+hackeeg = HackEEGBoard(SERIAL_PORT_PATH, debug=False, target_mode=1)
 try:
     hackeeg.connect()
     # print(hackeeg.mode)
@@ -63,7 +63,7 @@ try:
         # result = hackeeg.read_response()
         result = hackeeg.read_rdatac_response()
         # result = hackeeg.rdatac()
-        # print('RESULT:',result)
+        print('RESULT:',result)
         status_code = result.get('STATUS_CODE')
         status_text = result.get('STATUS_TEXT')
         status_code = result.get('ads_status')

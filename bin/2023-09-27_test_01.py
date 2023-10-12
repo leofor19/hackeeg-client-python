@@ -46,7 +46,8 @@ DEFAULT_NUMBER_OF_SAMPLES_TO_CAPTURE = 10000
 # # print(arduino_ports)
 # SERIAL_PORT_PATH = arduino_ports[0]
 
-hackeeg = HackEEGBoard(debug=False)
+# hackeeg = HackEEGBoard(debug=False)
+hackeeg = HackEEGBoard(debug=True)
 
 try:
     hackeeg.connect()
@@ -57,11 +58,13 @@ try:
     hackeeg.blink_board_led()
     hackeeg.disable_all_channels()
     sample_mode = ads1299.HIGH_RES_250_SPS | ads1299.CONFIG1_const
+    # sample_mode = ads1299.HIGH_RES_16k_SPS | ads1299.CONFIG1_const
     hackeeg.wreg(ads1299.CONFIG1, sample_mode)
     test_signal_mode = ads1299.INT_TEST_4HZ | ads1299.CONFIG2_const
     hackeeg.wreg(ads1299.CONFIG2, test_signal_mode)
     hackeeg.enable_all_channels()
     # print('mode:', hackeeg.mode)
+    # hackeeg.jsonlines_mode()
     hackeeg.messagepack_mode()
     # print('mode:', hackeeg.mode)
     hackeeg.main(duration=1, speed=250)

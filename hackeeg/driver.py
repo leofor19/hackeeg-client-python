@@ -105,7 +105,9 @@ class HackEEGBoard:
         # self.serial_port = io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port)
         # self.binaryBufferedSerialPort = io.BufferedReader(io.BufferedRWPair(self.raw_serial_port, self.raw_serial_port))
         # self.message_pack_unpacker = msgpack.Unpacker(self.binaryBufferedSerialPort, raw=False, use_list=False)
-        self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port, raw=False, use_list=False)
+        self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False)
+        # self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port, raw=True, use_list=False, strict_map_key=False)
+        # self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port, raw=True, use_list=False)
 
     def connect(self):
         self.mode = self._sense_protocol_mode()
@@ -185,13 +187,29 @@ class HackEEGBoard:
         if serial_port is None:
             line = self.serial_port.readline()
         elif serial_port == "raw":
-            line = self.raw_serial_port.readline().decode()
+            # line = self.raw_serial_port.readline().decode()
+            # line = self.raw_serial_port.readline().decode(errors='replace')
+            line = self.raw_serial_port.readline().decode(errors='ignore')
+            # line = self.raw_serial_port.readline()
         else:
             raise HackEEGException('Unknown serial port designator; must be either None or "raw"')
         return line
 
+    # def _serial_read_messagepack_message(self):
+    #     try:
+    #         while True:
+    #             message = self.message_pack_unpacker.unpack()
+    #             # message = message.to_bytes(1, sys.byteorder)
+    #             print(message)
+    #     except msgpack.exceptions.OutOfData:
+    #         if self.debug:
+    #             print(f"message: {message}")
+    #         return message
+
     def _serial_read_messagepack_message(self):
         message = self.message_pack_unpacker.unpack()
+        # message = message.to_bytes(1, sys.byteorder)
+        # print(message)
         if self.debug:
             print(f"message: {message}")
         return message
@@ -204,19 +222,31 @@ class HackEEGBoard:
         if (not self.quiet) or (self.debug):
             print(response)
         if response:
-            if isinstance(response, dict):
+            # if isinstance(response, dict):
+            try:
                 data = response.get(self.DataKey)
-                if data is None:
-                    data = response.get(self.MpDataKey)
-                    # if type(data) is str:
-                    # if isinstance(data, str) or isinstance(data, bytes):
-                    if self._isBase64(data):
-                        try:
-                            data = base64.b64decode(data)
-                        except binascii.Error:
-                            print(f"incorrect padding: {data}")
-                # if data and (type(data) is list) or (type(data) is bytes):
-                if data and (isinstance(data, list) or isinstance(data, bytes)):
+            except (AttributeError, KeyError):
+                data = response
+            if data is None:
+                data = response.get(self.MpDataKey)
+                # if data:
+                    # data = bytearray(data)
+            # if type(data) is str:
+            # if isinstance(data, str) or isinstance(data, bytes):
+            # if self._isBase64(data):
+            if isinstance(data, str):
+                try:
+                    data = base64.b64decode(data)
+                except binascii.Error:
+                    print(f"incorrect padding: {data}")
+                except TypeError:
+                    # keep data as is
+                    pass
+            # if data and (type(data) is list) or (type(data) is bytes):
+            # if data and (isinstance(data, list) or isinstance(data, bytes)):
+            if data:
+                try:
+                    # data = bytearray(data)
                     data_hex = ":".join("{:02x}".format(c) for c in data)
                     if error:
                         print(data_hex)
@@ -244,6 +274,8 @@ class HackEEGBoard:
                     response['channel_data'] = channel_data
                     response['data_hex'] = data_hex
                     response['data_raw'] = data
+                except (UnicodeDecodeError, AttributeError, TypeError):
+                    response = data
         return response
 
     def set_debug(self, debug):
@@ -269,9 +301,20 @@ class HackEEGBoard:
     def read_rdatac_response(self):
         """read a response from the Arduino– JSON Lines or MessagePack mode are ok"""
         if self.mode == self.MessagePackMode:
-            response_obj = self._serial_read_messagepack_message()
+            buffer = self._serial_read_messagepack_message()
+            while isinstance(buffer, int):
+                # this routine flushes the buffer of any non-messagepack data
+                buffer = self._serial_read_messagepack_message()
+            response_obj = buffer
+            # self.raw_serial_port.reset_input_buffer()
+            # response_obj = self._serial_read_messagepack_message()
         else:
-            message = self._serial_readline()
+            buffer = self._serial_readline()
+            while isinstance(buffer, int):
+                # this routine flushes the buffer of any non-jsonlines data
+                buffer = self._serial_read_messagepack_message()
+            message = buffer
+            # message = self._serial_readline()
             try:
                 response_obj = json.loads(message)
             except JSONDecodeError:
@@ -558,7 +601,7 @@ class HackEEGBoard:
         else:
             pd.DataFrame(data).to_parquet(filepath, engine=parquet_engine, object_encoding='utf8', write_index= False)
 
-    def main(self, max_samples=None, duration=None, speed=None):
+    def main(self, max_samples=None, duration=None, speed=None, save2parquet=True, save2csv=True):
 
         if max_samples is None:
             max_samples = self.max_samples
@@ -570,11 +613,16 @@ class HackEEGBoard:
             speed = self.speed
 
         max_sample_time = duration * speed
-        print(max_sample_time)
+        # print(max_sample_time)
+
+        self.rdatac()
+        self.start()
 
         samples = []
         sample_counter = 0
         clock = 0
+
+        result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
 
         end_time = time.perf_counter()
         start_time = time.perf_counter()
@@ -591,14 +639,18 @@ class HackEEGBoard:
 
         dur = end_time - start_time
         self.stop_and_sdatac_messagepack()
-        self.blink_board_led()
 
         # print(pd.DataFrame(samples))
-        self.save2csv(samples)
-        self.save2parquet(samples)
+        if save2csv:
+            self.save2csv(samples)
+        if save2parquet:
+            self.save2parquet(samples)
 
         print(f"duration in seconds: {dur}")
         samples_per_second = sample_counter / dur
         print(f"samples per second: {samples_per_second}")
         # dropped_samples = self.find_dropped_samples(samples, sample_counter)
         # print(f"dropped samples: {dropped_samples}")
+        # self.jsonlines_mode()
+        self.reset()
+        self.blink_board_led()
