@@ -35,4 +35,5 @@ import hackeeg
 DEFAULT_NUMBER_OF_SAMPLES_TO_CAPTURE = 10000
 
 # hackeeg_scan(duration=1, samples_per_second=250)
-hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=True, debug=True)
+# hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=True, debug=True)
+hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=False, debug=True, gain=24)

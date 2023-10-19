@@ -21,7 +21,7 @@ Main operation is through the HackEEGBoard class. The main command is scan, whic
     hackeeg = HackEEGBoard(debug=False)
 
     try:
-        hackeeg.scan(duration=1, samples_per_second=250)
+        hackeeg.scan(duration=1, samples_per_second=16000)
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
@@ -29,12 +29,12 @@ Main operation is through the HackEEGBoard class. The main command is scan, whic
     ```
 
     or
-    
+
     ```
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     import hackeeg
 
-    hackeeg.hackeeg_scan(duration=1, samples_per_second=250)
+    hackeeg.hackeeg_scan(duration=1, samples_per_second=16000)
     ```
 
 Classes
@@ -90,10 +90,11 @@ import binascii
 from datetime import datetime
 import io
 import json
-import sys
 from json import JSONDecodeError
 import os
 from pathlib import Path
+import sys
+import time
 import warnings
 
 import msgpack
@@ -101,7 +102,6 @@ import numpy as np
 import pandas as pd
 import serial
 import serial.tools.list_ports
-import time
 
 from . import ads1299
 
@@ -131,16 +131,82 @@ GAINS = {1: ads1299.GAIN_1X,
 
 
 class Status:
+    """
+    A class representing status codes used in the HackEEG driver.
+    """
     Ok = 200
     BadRequest = 400
     Error = 500
 
 
 class HackEEGException(Exception):
+    """
+    Exception raised for errors in the HackEEG driver.
+
+    Attributes:
+        None
+    """
     pass
 
 
 class HackEEGBoard:
+    """
+    The HackEEGBoard class is responsible for initializing the HackEEG Driver class, connecting to the Arduino board, 
+    setting the communication mode to either JSON Lines or MessagePack, writing a command to the serial port, and reading 
+    a line from the specified serial port and returning it as a string.
+
+    Attributes
+    ----------
+    TextMode : int
+        The text mode for the recording.
+    JsonLinesMode : int
+        The JSON Lines mode for the recording.
+    MessagePackMode : int
+        The MessagePack mode for the recording.
+    CommandKey : str
+        The command key for the recording.
+    ParametersKey : str
+        The parameters key for the recording.
+    HeadersKey : str
+        The headers key for the recording.
+    DataKey : str
+        The data key for the recording.
+    DecodedDataKey : str
+        The decoded data key for the recording.
+    StatusCodeKey : str
+        The status code key for the recording.
+    StatusTextKey : str
+        The status text key for the recording.
+    MpCommandKey : str
+        The MessagePack command key for the recording.
+    MpParametersKey : str
+        The MessagePack parameters key for the recording.
+    MpHeadersKey : str
+        The MessagePack headers key for the recording.
+    MpDataKey : str
+        The MessagePack data key for the recording.
+    MpStatusCodeKey : str
+        The MessagePack status code key for the recording.
+    MpStatusTextKey : str
+        The MessagePack status text key for the recording.
+    MaxConnectionAttempts : int
+        The maximum connection attempts before cancelling.
+    ConnectionSleepTime : float
+        The maximum wait time for connection before cancelling.
+
+    Methods
+    -------
+    __init__(self, serial_port_path=None, baudrate=DEFAULT_BAUDRATE, debug=False, quiet=True,
+                    max_samples=100000, duration=1, target_mode=2, samples_per_second=16000, MaxConnectionAttempts=10, ConnectionSleepTime=0.1)
+        Initializes the HackEEG Driver class.
+    connect(self)
+        Connects to the Arduino board and sets the communication mode to either JSON Lines or MessagePack.
+        If the connection fails, it retries a maximum of `MaxConnectionAttempts` = 10 times.
+    _serial_write(self, command)
+        Writes a command to the serial port.
+    _serial_readline(self, serial_port='raw')
+        Reads a line from the specified serial port and returns it as a string.
+    """
     TextMode = 0
     JsonLinesMode = 1
     MessagePackMode = 2
@@ -219,54 +285,54 @@ class HackEEGBoard:
         self.connect()
 
     def connect(self):
-            """
-            Connects to the Arduino board and sets the communication mode to either JSON Lines or MessagePack.
-            If the connection fails, it retries a maximum of `MaxConnectionAttempts` = 10 times.
-            """
-            self.mode = self._sense_protocol_mode()
-            if self.mode == self.TextMode:
-                attempts = 0
-                connected = False
-                while attempts < self.MaxConnectionAttempts:
-                    try:
-                        if self.target_mode == 2:
-                            self.messagepack_mode()
-                        else:
-                            self.jsonlines_mode()
-                        connected = True
-                        break
-                    except JSONDecodeError:
-                        if attempts == 0:
-                            print("Connecting...", end='')
-                        elif attempts > 0:
-                            print('.', end='')
-                        sys.stdout.flush()
-                        attempts += 1
-                        time.sleep(self.ConnectionSleepTime)
-                if attempts > 0:
-                    print()
-                if not connected:
-                    raise HackEEGException("Can't connect to Arduino")
-            self.sdatac()
+        """
+        Connects to the Arduino board and sets the communication mode to either JSON Lines or MessagePack.
+        If the connection fails, it retries a maximum of `MaxConnectionAttempts` = 10 times.
+        """
+        self.mode = self._sense_protocol_mode()
+        if self.mode == self.TextMode:
+            attempts = 0
+            connected = False
+            while attempts < self.MaxConnectionAttempts:
+                try:
+                    if self.target_mode == 2:
+                        self.messagepack_mode()
+                    else:
+                        self.jsonlines_mode()
+                    connected = True
+                    break
+                except JSONDecodeError:
+                    if attempts == 0:
+                        print("Connecting...", end='')
+                    elif attempts > 0:
+                        print('.', end='')
+                    sys.stdout.flush()
+                    attempts += 1
+                    time.sleep(self.ConnectionSleepTime)
+            if attempts > 0:
+                print()
+            if not connected:
+                raise HackEEGException("Can't connect to Arduino")
+        self.sdatac()
+        line = self.serial_port.readline()
+        while line:
             line = self.serial_port.readline()
-            while line:
-                line = self.serial_port.readline()
 
     def _serial_write(self, command):
-            """
-            Writes a command to the serial port.
+        """
+        Writes a command to the serial port.
 
-            Args:
-                command (str or bytes): The command to be written to the serial port.
+        Args:
+            command (str or bytes): The command to be written to the serial port.
 
-            Returns:
-                None
-            """
-            if isinstance(command, str):
-                self.serial_port.write(command.encode())
-            else:
-                self.serial_port.write(command)
-            self.serial_port.flush()
+        Returns:
+            None
+        """
+        if isinstance(command, str):
+            self.serial_port.write(command.encode())
+        else:
+            self.serial_port.write(command)
+        self.serial_port.flush()
 
     def _serial_readline(self, serial_port='raw'):
         """
@@ -293,16 +359,16 @@ class HackEEGBoard:
         return line
 
     def _serial_read_messagepack_message(self):
-            """
-            Reads a message from the serial port using MessagePack format.
+        """
+        Reads a message from the serial port using MessagePack format.
 
-            Returns:
-            - message (bytes): The message read from the serial port.
-            """
-            message = self.message_pack_unpacker.unpack()
-            if self.debug:
-                print(f"message: {message}")
-            return message
+        Returns:
+        - message (bytes): The message read from the serial port.
+        """
+        message = self.message_pack_unpacker.unpack()
+        if self.debug:
+            print(f"message: {message}")
+        return message
 
     def _decode_data(self, response):
         """decode ADS1299 sample status bits - datasheet, p36
@@ -377,40 +443,40 @@ class HackEEGBoard:
         return response
 
     def set_debug(self, debug):
-            """
-            Set the debug mode for the driver.
+        """
+        Set the debug mode for the driver.
 
-            Args:
-                debug (bool): Whether to enable debug mode or not.
-            """
-            self.debug = debug
+        Args:
+            debug (bool): Whether to enable debug mode or not.
+        """
+        self.debug = debug
 
     def read_response(self, serial_port='raw'):
-            """
-            Read a response from the Arduino in JSON Lines mode.
+        """
+        Read a response from the Arduino in JSON Lines mode.
 
-            Important: Must be in JSON Lines mode.
+        Important: Must be in JSON Lines mode.
 
-            Args:
-                serial_port (str): The serial port to read from. Defaults to 'raw'.
+        Args:
+            serial_port (str): The serial port to read from. Defaults to 'raw'.
 
-            Returns:
-                The decoded data from the response object.
-            """
+        Returns:
+            The decoded data from the response object.
+        """
 
-            message = self._serial_readline(serial_port=serial_port)
-            try:
-                response_obj = json.loads(message)
-            except UnicodeDecodeError:
-                response_obj = None
-            except JSONDecodeError:
-                response_obj = None
-            if self.debug:
-                print(f"read_response line: {message}")
-            if self.debug:
-                print("json response:")
-                print(self.format_json(response_obj))
-            return self._decode_data(response_obj)
+        message = self._serial_readline(serial_port=serial_port)
+        try:
+            response_obj = json.loads(message)
+        except UnicodeDecodeError:
+            response_obj = None
+        except JSONDecodeError:
+            response_obj = None
+        if self.debug:
+            print(f"read_response line: {message}")
+        if self.debug:
+            print("json response:")
+            print(self.format_json(response_obj))
+        return self._decode_data(response_obj)
 
     def read_rdatac_response(self):
         """Read a response from the Arduino in either JSON Lines or MessagePack modes."""
@@ -442,72 +508,73 @@ class HackEEGBoard:
         return result
 
     def format_json(self, json_obj):
-            """
-            Formats a JSON object as a string with indentation and sorted keys.
+        """
+        Formats a JSON object as a string with indentation and sorted keys.
 
-            Args:
-                json_obj (dict): The JSON object to format.
+        Args:
+            json_obj (dict): The JSON object to format.
 
-            Returns:
-                str: The formatted JSON object as a string.
-            """
-            return json.dumps(json_obj, indent=4, sort_keys=True)
+        Returns:
+            str: The formatted JSON object as a string.
+        """
+        return json.dumps(json_obj, indent=4, sort_keys=True)
 
     def send_command(self, command, parameters=None):
-            """
-            Sends a command to the device over serial connection in JSON Lines mode.
+        """
+        Sends a command to the device over serial connection in JSON Lines mode.
 
-            Args:
-                command (str): The command to send to the device.
-                parameters (dict, optional): A dictionary of parameters to include with the command. Defaults to None.
+        Args:
+            command (str): The command to send to the device.
+            parameters (dict, optional): A dictionary of parameters to include with the command. Defaults to None.
 
-            Returns:
-                None
-            """
-            if self.debug:
-                print(f"command: {command}  parameters: {parameters}")
-            # commands are only sent in JSON Lines mode
-            new_command_obj = {self.CommandKey: command, self.ParametersKey: parameters}
-            new_command = str(json.dumps(new_command_obj)) # EXTREMELY IMPORTANT: convert to string, otherwise does not work
-            if self.debug:
-                print("json command:")
-                print(self.format_json(new_command_obj))
-            self._serial_write(new_command)
-            self._serial_write('\n')
+        Returns:
+            None
+        """
+        if self.debug:
+            print(f"command: {command}  parameters: {parameters}")
+        # commands are only sent in JSON Lines mode
+        new_command_obj = {self.CommandKey: command, self.ParametersKey: parameters}
+        new_command = str(json.dumps(new_command_obj)) # EXTREMELY IMPORTANT: convert to string, otherwise does not work
+        if self.debug:
+            print("json command:")
+            print(self.format_json(new_command_obj))
+        self._serial_write(new_command)
+        self._serial_write('\n')
 
     def send_text_command(self, command):
-            """
-            Sends a text command to the device.
+        """
+        Sends a text command to the device.
 
-            Args:
-                command (str): The command to send.
+        Args:
+            command (str): The command to send.
 
-            Returns:
-                None
-            """
-            new = command + '\n'
-            self._serial_write(new.encode())
+        Returns:
+            None
+        """
+        new = command + '\n'
+        self._serial_write(new.encode())
 
     def execute_command(self, command, parameters=None, serial_port='raw'):
-            """
-            Executes a command on the HackEEG device and returns the response.
+        """
+        Executes a command on the HackEEG device and returns the response.
 
-            Args:
-                command (str): The command to execute.
-                parameters (list, optional): The parameters for the command. Defaults to None.
-                serial_port (str, optional): The serial port to use. Defaults to 'raw'.
+        Args:
+            command (str): The command to execute.
+            parameters (list, optional): The parameters for the command. Defaults to None.
+            serial_port (str, optional): The serial port to use. Defaults to 'raw'.
 
-            Returns:
-                str: The response from the device.
-            """
-            if parameters is None:
-                parameters = []
-            self.send_command(command, parameters)
-            response = self.read_response(serial_port=serial_port)
-            return response
+        Returns:
+            str: The response from the device.
+        """
+        if parameters is None:
+            parameters = []
+        self.send_command(command, parameters)
+        response = self.read_response(serial_port=serial_port)
+        return response
 
     def _sense_protocol_mode(self):
-        """Senses the protocol mode of the Arduino. Returns either Text Mode or JSON Lines Mode."""
+        """Senses the protocol mode of the Arduino. Returns either Text Mode or JSON Lines Mode.
+        """
         try:
             self.send_command("stop")
             self.send_command("sdatac")
@@ -522,34 +589,34 @@ class HackEEGBoard:
         return response.get(self.StatusCodeKey) == Status.Ok
 
     def wreg(self, register, value):
-            """
-            Writes a value to a register in the HackEEG device.
+        """
+        Writes a value to a register in the HackEEG device.
 
-            Args:
-                register (int): The register to write to.
-                value (int): The value to write to the register.
+        Args:
+            register (int): The register to write to.
+            value (int): The value to write to the register.
 
-            Returns:
-                str: The response from the device.
-            """
-            command = "wreg"
-            parameters = [register, value]
-            return self.execute_command(command, parameters)
+        Returns:
+            str: The response from the device.
+        """
+        command = "wreg"
+        parameters = [register, value]
+        return self.execute_command(command, parameters)
 
     def rreg(self, register):
-            """
-            Reads the value of a specified register from the HackEEG device.
+        """
+        Reads the value of a specified register from the HackEEG device.
 
-            Args:
-                register (int): The register number to read.
+        Args:
+            register (int): The register number to read.
 
-            Returns:
-                str: The response from the device.
-            """
-            command = "rreg"
-            parameters = [register]
-            response = self.execute_command(command, parameters)
-            return response
+        Returns:
+            str: The response from the device.
+        """
+        command = "rreg"
+        parameters = [register]
+        response = self.execute_command(command, parameters)
+        return response
 
     def nop(self):
         """
@@ -564,26 +631,26 @@ class HackEEGBoard:
         return self.execute_command("boardledon")
 
     def boardledoff(self):
-            """
-            Turns off the HackEEG Shield LED (blue).
+        """
+        Turns off the HackEEG Shield LED (blue).
 
-            Returns:
-            --------
-            str:
-                The response from the command execution.
-            """
-            return self.execute_command("boardledoff")
+        Returns:
+        --------
+        str:
+            The response from the command execution.
+        """
+        return self.execute_command("boardledoff")
 
     def ledon(self):
-            """
-            Sends a command to turn on the Arduino Due onboard LED.
+        """
+        Sends a command to turn on the Arduino Due onboard LED.
 
-            Returns:
-            -------
-            str
-                The response from the device after executing the command.
-            """
-            return self.execute_command("ledon")
+        Returns:
+        -------
+        str
+            The response from the device after executing the command.
+        """
+        return self.execute_command("ledon")
 
     def ledoff(self):
         """
@@ -628,15 +695,15 @@ class HackEEGBoard:
         return self.execute_command("start")
 
     def stop(self):
-            """
-            Sends a command to stop data acquisition.
+        """
+        Sends a command to stop data acquisition.
 
-            Returns:
-            -------
-            str
-                The response from the device after executing the command.
-            """
-            return self.execute_command("stop")
+        Returns:
+        -------
+        str
+            The response from the device after executing the command.
+        """
+        return self.execute_command("stop")
 
     def rdata(self):
         """
@@ -661,31 +728,31 @@ class HackEEGBoard:
         return self.execute_command("status")
 
     def jsonlines_mode(self):
-            """
-            Sets operation to JSON Lines Mode and returns the response from the device.
-            """
-            old_mode = self.mode
-            self.mode = self.JsonLinesMode
-            if old_mode == self.TextMode:
-                self.send_text_command("jsonlines")
-                return self.read_response()
-            if old_mode == self.JsonLinesMode:
-                self.execute_command("jsonlines")
+        """
+        Sets operation to JSON Lines Mode and returns the response from the device.
+        """
+        old_mode = self.mode
+        self.mode = self.JsonLinesMode
+        if old_mode == self.TextMode:
+            self.send_text_command("jsonlines")
+            return self.read_response()
+        if old_mode == self.JsonLinesMode:
+            self.execute_command("jsonlines")
 
     def messagepack_mode(self):
-            """
-            Sets operation to MessagePack mode and returns the response from the device.
-            """
-            old_mode = self.mode
-            self.mode = self.MessagePackMode
-            if old_mode == self.TextMode:
-                self.send_text_command("jsonlines")
-                response = self.read_response()
-                self.execute_command("messagepack")
-                return response
-            elif old_mode == self.JsonLinesMode:
-                response = self.execute_command("messagepack")
-                return response
+        """
+        Sets operation to MessagePack mode and returns the response from the device.
+        """
+        old_mode = self.mode
+        self.mode = self.MessagePackMode
+        if old_mode == self.TextMode:
+            self.send_text_command("jsonlines")
+            response = self.read_response()
+            self.execute_command("messagepack")
+            return response
+        elif old_mode == self.JsonLinesMode:
+            response = self.execute_command("messagepack")
+            return response
 
     def rdatac(self):
         result = self.execute_command("rdatac", serial_port="raw")
@@ -714,29 +781,35 @@ class HackEEGBoard:
             line = self.raw_serial_port.read()
 
     def enable_channel(self, channel, gain=None):
-            """
-            Enables a specified channel with a specified gain.
+        """
+        Enables a specified channel with a specified gain.
 
-            If no gain is specified, the default gain is 1x.
+        If no gain is specified, the default gain is 1x.
 
-            Args:
-                channel (int): The channel to enable.
-                gain (int, optional): The gain to use for the channel. Defaults to None.
-                        Options are: 1, 2, 4, 6, 8, 12, 24
+        Args:
+            channel (int): The channel to enable.
+            gain (int, optional): The gain to use for the channel. Defaults to None.
+                    Options are: 1, 2, 4, 6, 8, 12, 24
 
-            Returns:
-                None
-            """
-            if gain is None:
-                gain = ads1299.GAIN_1X
-            temp_rdatac_mode = self.rdatac_mode
-            if self.rdatac_mode:
-                self.sdatac()
-            command = "wreg"
-            parameters = [ads1299.CHnSET + channel, ads1299.ELECTRODE_INPUT | gain]
-            self.execute_command(command, parameters)
-            if temp_rdatac_mode:
-                self.rdatac()
+        Returns:
+            None
+        """
+        if gain is None:
+            gain = ads1299.GAIN_1X
+        elif gain in (1,2,4,6,8,12,24):
+            gain = GAINS[gain]
+        elif gain in GAINS.values(): # if gain is already in the correct format for registers
+            pass
+        else:
+            raise ValueError(f"Gain was {gain}, but gain must be 1, 2, 4, 6, 8, 12, or 24")
+        temp_rdatac_mode = self.rdatac_mode
+        if self.rdatac_mode:
+            self.sdatac()
+        command = "wreg"
+        parameters = [ads1299.CHnSET + channel, ads1299.ELECTRODE_INPUT | gain]
+        self.execute_command(command, parameters)
+        if temp_rdatac_mode:
+            self.rdatac()
 
     def disable_channel(self, channel):
         """
@@ -750,14 +823,14 @@ class HackEEGBoard:
         self.execute_command(command, parameters)
 
     def enable_all_channels(self, gain=None):
-            """
-            Enables all channels of the HackEEG device with the specified gain (or the default gain if none).
+        """
+        Enables all channels of the HackEEG device with the specified gain (or the default gain if none).
 
-            Args:
-            - gain (float): the gain to set for all channels (optional). Defaults to None, resulting in 1x.
-            """
-            for channel in range(1, 9):
-                self.enable_channel(channel, gain)
+        Args:
+        - gain (float): the gain to set for all channels (optional). Defaults to None, resulting in 1x.
+        """
+        for channel in range(1, 9):
+            self.enable_channel(channel, gain)
 
     def disable_all_channels(self):
         """Disables all channels of the HackEEG device."""
@@ -771,26 +844,26 @@ class HackEEGBoard:
         self.execute_command("boardledoff")
 
     def locate_arduino_port(self):
-            """
-            Locates the port where the Arduino is connected to the computer.
+        """
+        Locates the port where the Arduino is connected to the computer.
 
-            Returns:
-            str: The port where the Arduino is connected to the computer.
+        Returns:
+        str: The port where the Arduino is connected to the computer.
 
-            Raises:
-            IOError: If no Arduino is found.
-            Warning: If multiple Arduinos are found, uses the first.
-            """
-            arduino_ports = [
+        Raises:
+        IOError: If no Arduino is found.
+        Warning: If multiple Arduinos are found, uses the first.
+        """
+        arduino_ports = [
             p.device for p in serial.tools.list_ports.comports() if 'Arduino' in p.description  # may need tweaking to match new arduinos
             ]
 
-            if not arduino_ports:
-                raise IOError("No Arduino found")
-            if len(arduino_ports) > 1:
-                warnings.warn('Multiple Arduinos found - using the first')
+        if not arduino_ports:
+            raise IOError("No Arduino found")
+        if len(arduino_ports) > 1:
+            warnings.warn('Multiple Arduinos found - using the first')
 
-            return arduino_ports[0]
+        return arduino_ports[0]
 
     def _isBase64(self, sb):
         """Identifies if input is Base64 encoded, returns bool.
@@ -825,68 +898,68 @@ class HackEEGBoard:
             return False
 
     def process_sample(self, result, samples, outhex=False):
-            """
-            Processes a sample of data received from the EEG device.
+        """
+        Processes a sample of data received from the EEG device.
 
-            Args:
-                result (dict): A dictionary containing the sample data.
-                samples (list): A list to which the sample will be appended.
-                outhex (bool, optional): Whether to output the sample data in hexadecimal format. Defaults to False.
-            """
-            data = None
-            channel_data = None
-            if result:
-                status_code = result.get(self.MpStatusCodeKey)
-                data = result.get(self.MpDataKey)
-                samples.append(result)
-                if status_code == Status.Ok and data:
-                    if not self.quiet:
-                        timestamp = result.get('timestamp')
-                        sample_number = result.get('sample_number')
-                        ads_gpio = result.get('ads_gpio')
-                        loff_statp = result.get('loff_statp')
-                        loff_statn = result.get('loff_statn')
-                        channel_data = result.get('channel_data')
-                        data_hex = result.get('data_hex')
-                        print(
-                            f"timestamp:{timestamp} sample_number: {sample_number}| gpio:{ads_gpio} loff_statp:{loff_statp} loff_statn:{loff_statn}   ",
-                            end='')
-                        if outhex:
-                            print(data_hex)
-                        for channel_number, sample in enumerate(channel_data):
-                            print(f"{channel_number + 1}:{sample} ", end='')
-                        print()
-                else:
-                    if not self.quiet:
-                        print(data)
+        Args:
+            result (dict): A dictionary containing the sample data.
+            samples (list): A list to which the sample will be appended.
+            outhex (bool, optional): Whether to output the sample data in hexadecimal format. Defaults to False.
+        """
+        data = None
+        channel_data = None
+        if result:
+            status_code = result.get(self.MpStatusCodeKey)
+            data = result.get(self.MpDataKey)
+            samples.append(result)
+            if status_code == Status.Ok and data:
+                if not self.quiet:
+                    timestamp = result.get('timestamp')
+                    sample_number = result.get('sample_number')
+                    ads_gpio = result.get('ads_gpio')
+                    loff_statp = result.get('loff_statp')
+                    loff_statn = result.get('loff_statn')
+                    channel_data = result.get('channel_data')
+                    data_hex = result.get('data_hex')
+                    print(
+                        f"timestamp:{timestamp} sample_number: {sample_number}| gpio:{ads_gpio} loff_statp:{loff_statp} loff_statn:{loff_statn}   ",
+                        end='')
+                    if outhex:
+                        print(data_hex)
+                    for channel_number, sample in enumerate(channel_data):
+                        print(f"{channel_number + 1}:{sample} ", end='')
+                    print()
             else:
-                print("no data to decode")
-                print(f"result: {result}")
+                if not self.quiet:
+                    print(data)
+        else:
+            print("no data to decode")
+            print(f"result: {result}")
 
     def save2csv(self, data, filepath=None):
-            """
-            Saves data to a CSV file at the specified filepath.
+        """
+        Saves data to a CSV file at the specified filepath.
 
-            If no filepath is provided, the default filepath is used ('./data/{%Y-%m-%d_%H-%M-%S}_data.csv').
+        If no filepath is provided, the default filepath is used ('./data/{%Y-%m-%d_%H-%M-%S}_data.csv').
 
-            Args:
-            - data: the data to be saved to the CSV file. Can be a Pandas DataFrame or a list of lists.
-            - filepath: the filepath where the CSV file will be saved. If not provided, the default filepath is used.
+        Args:
+        - data: the data to be saved to the CSV file. Can be a Pandas DataFrame or a list of lists.
+        - filepath: the filepath where the CSV file will be saved. If not provided, the default filepath is used.
 
-            Returns:
-            None
-            """
-            if filepath is None:
-                filepath = self.default_filepath
-            if ~filepath.endswith('.csv'):
-                filepath = "".join((filepath.rstrip('/'), '.csv'))
-            if not os.path.exists(os.path.dirname(filepath)):
-                os.makedirs(os.path.dirname(filepath))
-            if isinstance(data, pd.DataFrame):
-                df = data
-            else:
-                df = pd.DataFrame(data)
-            df.to_csv(filepath)
+        Returns:
+        None
+        """
+        if filepath is None:
+            filepath = self.default_filepath
+        if ~filepath.endswith('.csv'):
+            filepath = "".join((filepath.rstrip('/'), '.csv'))
+        if not os.path.exists(os.path.dirname(filepath)):
+            os.makedirs(os.path.dirname(filepath))
+        if isinstance(data, pd.DataFrame):
+            df = data
+        else:
+            df = pd.DataFrame(data)
+        df.to_csv(filepath)
 
     def save2parquet(self, data, filepath=None, parquet_engine='pyarrow'):
         """
@@ -918,7 +991,7 @@ class HackEEGBoard:
             df.to_parquet(filepath, engine=parquet_engine, object_encoding='utf8', write_index= False)
 
     def scan(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True, 
-            find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
+                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
         """
         Perform data scan using the HackEEG board and process it into a pandas DataFrame.
 
@@ -959,6 +1032,8 @@ class HackEEGBoard:
         if samples_per_second is None:
             samples_per_second = self.speed
 
+        self.debug = debug
+
         self.sdatac()
         self.reset()
 
@@ -991,7 +1066,7 @@ class HackEEGBoard:
             return None
 
     def scan_and_close(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True,
-                        find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
+                    find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
         """
         Perform data scan using the HackEEG board and close the serial port when finished.
 
@@ -1060,12 +1135,11 @@ class HackEEGBoard:
             speed = self.speed
 
         max_sample_time = duration * speed
-        
+
         # self.start()
 
         samples = []
         sample_counter = 0
-        clock = 0
 
         self.rdatac()
 
@@ -1077,7 +1151,7 @@ class HackEEGBoard:
             result = self.read_rdatac_response()
             end_time = time.perf_counter()
             sample_counter += 1
-            if self.mode == 2: # MessagePack mode
+            if self.mode == 2:  # MessagePack mode
                 samples.append(result)
             else:
                 self.process_sample(result, samples)
@@ -1105,7 +1179,7 @@ class HackEEGBoard:
         sample_numbers = {self.get_sample_number(sample): 1 for sample in samples}
         correct_sequence = {index: 1 for index in range(0, number_of_samples)}
         missing_samples = [sample_number for sample_number in correct_sequence.keys()
-                if sample_number not in sample_numbers]
+                        if sample_number not in sample_numbers]
         return len(missing_samples)
 
     def get_sample_number(self, sample):
@@ -1121,7 +1195,7 @@ class HackEEGBoard:
         sample_number = sample.get('sample_number', -1)
         return sample_number
 
-    def process_df(self, df, sample_counter, duration, scale=1e-3):
+    def process_df(self, df, sample_counter, duration, scale=1e-3, gain=1):
         """
         Processes a Pandas DataFrame containing EEG data, including conversion of raw data to voltage values.
 
@@ -1130,6 +1204,7 @@ class HackEEGBoard:
         - sample_counter: The number of samples in the DataFrame.
         - duration: The duration of the recording in seconds.
         - scale: The scale to apply to the voltage data. Defaults to 1e-3 for milivolts.
+        - gain: The gain setting used for the recording. Defaults to 1.
 
         Returns:
         - df: The processed DataFrame.
@@ -1137,6 +1212,7 @@ class HackEEGBoard:
         df['total_samples'] = sample_counter
         df['total_duration'] = duration
         df['avg_sample_rate'] = sample_counter / duration
+        df['gain'] = gain
         for ch in np.arange(1, len(df.loc[0,'channel_data']) + 1):
             df[f'raw_ch{ch:02d}'] = df['channel_data'].apply(lambda x: x[ch-1])
             df[f'ch{ch:02d}'] = df[f'raw_ch{ch:02d}'].apply(lambda x: int_to_float(x, scale)) # convert to milivolts
@@ -1154,6 +1230,22 @@ class HackEEGBoard:
         return df
 
     def setup(self, samples_per_second=16000, gain=1, messagepack=True, channel_test=False):
+        """
+        Configures the HackEEG board with the specified settings.
+
+        Args:
+            samples_per_second (int) (optional): The number of samples per second to collect. Must be a valid speed. Default is 16000.
+            gain (int) (optional): The gain to use for the channels. Must be within 1, 2, 4, 6, 8, 12, 24. Default is 1.
+            messagepack (bool) (optional): Whether to use messagepack mode or jsonlines mode. Default is True.
+            channel_test (bool) (optional): Whether to run a channel test or not. Default is False.
+
+        Raises:
+            HackEEGException: If an invalid speed or gain is specified.
+
+        Returns:
+            None
+        """
+
         if samples_per_second not in SPEEDS.keys():
             raise HackEEGException("{} is not a valid speed; valid speeds are {}".format(
                 samples_per_second, sorted(SPEEDS.keys())))
@@ -1174,7 +1266,7 @@ class HackEEGBoard:
             self.channel_config_test()
         else:
             # self.channel_config_input(gain_setting)
-            self.enable_all_channels(gain=gain)
+            self.enable_all_channels(gain=gain_setting)
 
 
         # Route reference electrode to SRB1: JP8:1-2, JP7:NC (not connected)
@@ -1284,8 +1376,8 @@ def int_to_float(value, scale=1e-3):
     """
     return filter_24(filter_2scomplement_np(value), scale)
 
-def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True,
-                    find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
+def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True,             save2csv=True,
+                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
     """
     Perform data scan using the HackEEG board and close the serial port when finished.
 
@@ -1328,7 +1420,7 @@ def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_seco
         if hackeeg is None:
             hackeeg = HackEEGBoard(debug=debug)
         hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
-        find_dropped_samples, out_df, scale, debug, channel_test)
+                    find_dropped_samples, out_df, scale, debug, channel_test)
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
