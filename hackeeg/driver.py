@@ -991,7 +991,7 @@ class HackEEGBoard:
             df.to_parquet(filepath, engine=parquet_engine, object_encoding='utf8', write_index= False)
 
     def scan(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True, 
-                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
+                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False, filepath = None):
         """
         Perform data scan using the HackEEG board and process it into a pandas DataFrame.
 
@@ -1047,11 +1047,11 @@ class HackEEGBoard:
                 samples[s]["total_dropped_samples"] = dropped_samples
         df = pd.DataFrame(samples)
         if process_df:
-            self.process_df(df, sample_counter=sample_counter, duration=dur, scale=scale)
+            process_df(df, sample_counter=sample_counter, duration=dur, scale=scale, gain=gain)
         if save2csv:
-            self.save2csv(df)
+            self.save2csv(df, filepath=filepath)
         if save2parquet:
-            self.save2parquet(df)
+            self.save2parquet(df, filepath=filepath)
 
         print(f"duration in seconds: {dur}")
         samples_per_second = sample_counter / dur
@@ -1213,6 +1213,7 @@ class HackEEGBoard:
         df['total_duration'] = duration
         df['avg_sample_rate'] = sample_counter / duration
         df['gain'] = gain
+        df['num_chs'] = len(df['channel_data'][0])
         for ch in np.arange(1, len(df.loc[0,'channel_data']) + 1):
             df[f'raw_ch{ch:02d}'] = df['channel_data'].apply(lambda x: x[ch-1])
             df[f'ch{ch:02d}'] = df[f'raw_ch{ch:02d}'].apply(lambda x: int_to_float(x, scale)) # convert to milivolts
@@ -1376,8 +1377,43 @@ def int_to_float(value, scale=1e-3):
     """
     return filter_24(filter_2scomplement_np(value), scale)
 
+def process_df(df, sample_counter, duration, scale=1e-3, gain=1):
+    """
+    Processes a Pandas DataFrame containing EEG data, including conversion of raw data to voltage values.
+
+    Args:
+    - df: A Pandas DataFrame containing EEG data.
+    - sample_counter: The number of samples in the DataFrame.
+    - duration: The duration of the recording in seconds.
+    - scale: The scale to apply to the voltage data. Defaults to 1e-3 for milivolts.
+    - gain: The gain setting used for the recording. Defaults to 1.
+
+    Returns:
+    - df: The processed DataFrame.
+    """
+    df['total_samples'] = sample_counter
+    df['total_duration'] = duration
+    df['avg_sample_rate'] = sample_counter / duration
+    df['gain'] = gain
+    df['num_chs'] = len(df['channel_data'][0])
+    for ch in np.arange(1, len(df.loc[0,'channel_data']) + 1):
+        df[f'raw_ch{ch:02d}'] = df['channel_data'].apply(lambda x: x[ch-1])
+        df[f'ch{ch:02d}'] = df[f'raw_ch{ch:02d}'].apply(lambda x: int_to_float(x, scale)) # convert to milivolts
+    if scale == 1e-3:
+        df['ch_unit'] = 'mV'
+    elif scale == 1e-6:
+        df['ch_unit'] = 'uV'
+    elif scale == 1e-9:
+        df['ch_unit'] = 'nV'
+    elif scale == 1:
+        df['ch_unit'] = 'V'
+    else:
+        df['ch_unit'] = f'{scale:0.0e}'
+
+    return df
+
 def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True,             save2csv=True,
-                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
+                find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False, filepath=None):
     """
     Perform data scan using the HackEEG board and close the serial port when finished.
 
@@ -1419,9 +1455,15 @@ def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_seco
     try:
         if hackeeg is None:
             hackeeg = HackEEGBoard(debug=debug)
-        hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
-                    find_dropped_samples, out_df, scale, debug, channel_test)
+        if out_df:
+            df = hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
+                    find_dropped_samples, out_df, scale, debug, channel_test, filepath)
+        else:
+            hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
+                        find_dropped_samples, out_df, scale, debug, channel_test, filepath)
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
         print('Port Closed')
+        if out_df:
+            return df
