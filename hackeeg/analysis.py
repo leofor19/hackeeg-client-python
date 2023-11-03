@@ -49,7 +49,7 @@ def quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', 
     ax (matplotlib.axes._subplots.AxesSubplot): The resulting scatterplot.
     """
 
-    if 'D' in df.columns:
+    if 'loff_statn' in df.columns:
         df = extract_data_from_df(df, errors='ignore')
     df = wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
                     id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
@@ -60,6 +60,7 @@ def quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', 
         df = normalize(df, column=y, method=normalization)
 
     ax = sns.scatterplot(data=df, x=x, y=y, hue=hue, legend='full')
+    ax.set(xlabel='sample number', ylabel='voltage (mV)')
     sns.move_legend(ax, "center right", bbox_to_anchor=(1.15, 0.5), ncol=1)
 
     return ax
@@ -86,7 +87,7 @@ def quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', nor
     ax (matplotlib.axes.Axes): The resulting lineplot.
     """
 
-    if 'D' in df.columns:
+    if 'loff_statn' in df.columns:
         df = extract_data_from_df(df, errors='ignore')
     df = wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
                     id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
@@ -97,11 +98,12 @@ def quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', nor
         df = normalize(df, column=y, method=normalization)
 
     ax = sns.lineplot(data=df, x=x, y=y, hue=hue, legend='full')
+    ax.set(xlabel='sample number', ylabel='voltage (mV)')
     sns.move_legend(ax, "center right", bbox_to_anchor=(1.15, 0.5), ncol=1)
 
     return ax
 
-def quick_fftplot(df, scale='dB', normalization=None):
+def quick_fftplot(df, scale='dB', normalization=None, xlim=1000):
     """
     Plots the Fast Fourier Transform (FFT) of the input DataFrame.
 
@@ -121,7 +123,7 @@ def quick_fftplot(df, scale='dB', normalization=None):
     None
     """
 
-    if 'D' in df.columns:
+    if 'loff_statn' in df.columns:
         df = extract_data_from_df(df, errors='ignore')
     df = wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
                     id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
@@ -142,27 +144,29 @@ def quick_fftplot(df, scale='dB', normalization=None):
         xf = np.linspace(0.0, 1.0/(2.0*T), N//2)
         if scale == 'dB' or scale == 'db' or scale == 'DB':
             plt.plot(xf, 2.0/N * 20*np.log10(np.abs(yf[0:N//2])), label=f'ch{i:02d}')
-        elif isinstance(scale, float):
+        elif isinstance(scale, (int, float, complex)):
             plt.plot(xf, scale*2.0/N * np.abs(yf[0:N//2]), label=f'ch{i:02d}')
         else:
             plt.plot(xf, 2.0/N * np.abs(yf[0:N//2]), label=f'ch{i:02d}')
     plt.grid()
     plt.title('FFT')
-    plt.xlabel('Frequency')
+    plt.xlabel('frequency (Hz)')
     if scale == 'dB' or scale == 'db' or scale == 'DB':
         plt.ylabel('Power (dB)')
     else:
-        plt.ylabel('Amplitude')
-    # plt.xlim(0, 200)
-    # # plt.ylim(0,0.5)
-    # plt.autoscale(enable=True, axis='y', tight=True)
-    plt.autoscale(enable=True, tight=True)
+        plt.ylabel('amplitude (mV)')
+    plt.legend(loc='center right', bbox_to_anchor=(1.15, 0.5), ncol=1)
+    if isinstance(xlim, (int, float, complex)):
+        plt.xlim(0, xlim)
+        plt.autoscale(enable=True, axis='y', tight=True)
+    else:
+        plt.autoscale(enable=True, tight=True)
 
 def extract_data_from_df(df, errors='ignore'):
     """
-    df = df.drop([['C', 'D', 'ads_status', 'ads_gpio',
-                    'loff_statn', 'loff_statp', 'extra', 'channel_data', 'data_hex',
-                    'data_raw']], axis=1, errors=errors)
+    df = df.drop(['C', 'D', 'ads_status', 'ads_gpio',
+                    'loff_statn', 'loff_statp', 'extra', 'data_hex',
+                    'data_raw'], axis=1, errors=errors)
     Extracts relevant data from a pandas DataFrame object.
 
     Drops the following columns:
@@ -179,7 +183,7 @@ def extract_data_from_df(df, errors='ignore'):
     - A new pandas DataFrame object with irrelevant columns removed.
     """
     return df.drop(['C', 'D', 'ads_status', 'ads_gpio',
-                    'loff_statn', 'loff_statp', 'extra', 'channel_data', 'data_hex',
+                    'loff_statn', 'loff_statp', 'extra', 'data_hex',
                     'data_raw'], axis=1, errors=errors)
 
 def wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
@@ -230,6 +234,27 @@ def wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['volta
 
     return df
 
+def revert_wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
+                    id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
+                        'gain', 'ch_unit', 'num_chs'],
+                    rename_ch2int=True):
+    """
+    Converts a long-format EEG dataframe to a wide-format EEG dataframe.
+    """
+    # TODO: Verify this function works properly
+    if not check_if_wide(df):
+        df = df.pivot_table(index=id_vars,
+                            columns=value_vars_primitives,
+                            values=value_names)
+        df.reset_index(inplace=True)
+        # df.columns.name = None
+        # if rename_ch2int:
+        #     df.columns = df.columns.map('{0[0]}{0[1]:02d}'.format)
+    else:
+        print('The DataFrame is already in wide format.')
+
+    return df
+
 def normalize(df, column='voltage', method='minmax'):
     """
     Normalizes the voltage data in a HackEEG DataFrame.
@@ -243,14 +268,15 @@ def normalize(df, column='voltage', method='minmax'):
     Returns:
         pandas.DataFrame: The normalized DataFrame.
     """
+    # TODO: Fix!!!
     df = wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
                     id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
                         'gain', 'ch_unit', 'num_chs'],
                     rename_ch2int=True)
     if method == 'minmax':
-        return df.groupby('ch').apply(lambda x: (x[column] - x[column].min()) / (x[column].max() - x[column].min()))
+        return df.groupby(id_vars + ['ch']).apply(lambda x: (x[column] - x[column].min()) / (x[column].max() - x[column].min())).reset_index()
     elif method == 'zscore':
-        return df.groupby('ch').apply(lambda x: (x[column] - x[column].mean()) / x[column].std())
+        return df.groupby('ch').apply(lambda x: (x[column] - x[column].mean()) / x[column].std()).reset_index()
     else:
         print('Unrecognized normalization method. Please use either "minmax" or "zscore".')
 

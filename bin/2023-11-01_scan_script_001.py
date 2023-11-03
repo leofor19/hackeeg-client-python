@@ -22,6 +22,7 @@ import sys
 import time
 import uuid
 import warnings
+from matplotlib import pyplot as plt
 
 import numpy as np
 import scipy.io as sio
@@ -41,15 +42,24 @@ DEFAULT_NUMBER_OF_SAMPLES_TO_CAPTURE = 10000
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_noise-0-0-00-0-02'))
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-A-1-01-03'))
 
-filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-D-2-10-01'))
+# filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-D-2-10-01'))
+
+filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_dry_test_00-01'))
 
 # hackeeg_scan(duration=1, samples_per_second=250)
 # hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=True, debug=True)
-df = hackeeg.hackeeg_scan(duration=1, samples_per_second=16000, channel_test=False, debug=False, gain=1, filepath=filepath)
-# hackeeg.hackeeg_scan(duration=1, samples_per_second=16000, channel_test=False, debug=True, gain=1, filepath=filepath)
+df = hackeeg.hackeeg_scan(duration=5, samples_per_second=16000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True)
+# df = hackeeg.hackeeg_scan(duration=1, samples_per_second=16000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True)
 
 # ax1 = quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization='zscore')
 
-ax2 = quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization='zscore')
+# ax2 = han.quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization='zscore')
+ax2 = han.quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization=None)
+ax2.set_xlim(2400, 2500)
 
-quick_fftplot(df, scale='dB', normalization=None)
+
+plt.show()
+
+han.quick_fftplot(df, scale='dB', normalization=None)
+
+plt.show()

@@ -102,6 +102,7 @@ import numpy as np
 import pandas as pd
 import serial
 import serial.tools.list_ports
+from tqdm.autonotebook import tqdm
 
 from . import ads1299
 
@@ -109,7 +110,7 @@ from . import ads1299
 # - MessagePack
 # - MessagePack / Json Lines testing convenience functions
 
-NUMBER_OF_SAMPLES = 10000
+NUMBER_OF_SAMPLES = 100000
 DEFAULT_BAUDRATE = 115200
 SAMPLE_LENGTH_IN_BYTES = 38  # 216 bits encoded with base64 + '\r\n\'
 
@@ -280,6 +281,7 @@ class HackEEGBoard:
             print('Connected to Serial Port:')
             print(self.raw_serial_port)
         self.raw_serial_port.reset_input_buffer()
+        self.raw_serial_port.reset_output_buffer()
         self.serial_port= self.raw_serial_port
         self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False)
         self.connect()
@@ -990,7 +992,7 @@ class HackEEGBoard:
         else:
             df.to_parquet(filepath, engine=parquet_engine, object_encoding='utf8', write_index= False)
 
-    def scan(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True, 
+    def scan(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_data=True, save2parquet=True, save2csv=True, 
                 find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False, filepath = None):
         """
         Perform data scan using the HackEEG board and process it into a pandas DataFrame.
@@ -1007,7 +1009,7 @@ class HackEEGBoard:
             gain (int, optional):
                 The gain to use for the acquisition. Defaults to 1.
                 Options are: 1, 2, 4, 6, 8, 12, 24.
-            process_df (bool, optional):
+            process_data (bool, optional):
                 Whether to process the DataFrame. Defaults to True.
             save2parquet (bool, optional):
                 Whether to save the DataFrame to a parquet file. Defaults to True.
@@ -1046,8 +1048,8 @@ class HackEEGBoard:
             for s in np.arange(len(samples)):
                 samples[s]["total_dropped_samples"] = dropped_samples
         df = pd.DataFrame(samples)
-        if process_df:
-            process_df(df, sample_counter=sample_counter, duration=dur, scale=scale, gain=gain)
+        if process_data:
+            df = process_df(df, sample_counter=sample_counter, duration=dur, scale=scale, gain=gain)
         if save2csv:
             self.save2csv(df, filepath=filepath)
         if save2parquet:
@@ -1062,10 +1064,8 @@ class HackEEGBoard:
         self.blink_board_led()
         if out_df:
             return df
-        else:
-            return None
 
-    def scan_and_close(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True, save2csv=True,
+    def scan_and_close(self, max_samples=None, duration=None, samples_per_second=None, gain=1, process_data=True, save2parquet=True, save2csv=True,
                     find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False):
         """
         Perform data scan using the HackEEG board and close the serial port when finished.
@@ -1082,7 +1082,7 @@ class HackEEGBoard:
             gain (int, optional):
                 The gain to use for the acquisition. Defaults to 1.
                 Options are: 1, 2, 4, 6, 8, 12, 24.
-            process_df (bool, optional):
+            process_data (bool, optional):
                 Whether to process the DataFrame. Defaults to True.
             save2parquet (bool, optional):
                 Whether to save the DataFrame to a parquet file. Defaults to True.
@@ -1104,12 +1104,14 @@ class HackEEGBoard:
                 The DataFrame containing the processed data (if out_df is set to 'True').
         """
         try:
-            self.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
-            find_dropped_samples, out_df, scale, debug, channel_test)
+            df = self.scan(max_samples, duration, samples_per_second, gain, process_data, save2parquet, save2csv,
+                                find_dropped_samples, out_df, scale, debug, channel_test)
         finally:
             # routine to properly close serial port
             self.raw_serial_port.close()
             print('Port Closed')
+            if out_df:
+                return df
 
     def acquire_data(self, max_samples, duration, speed, display_output=False):
         """
@@ -1143,14 +1145,18 @@ class HackEEGBoard:
 
         self.rdatac()
 
+        progress = tqdm(total = max_sample_time, miniters=100)
+        tqdm.write("Flushing buffer...")
         result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
 
+        tqdm.write("Acquiring data...")
         end_time = time.perf_counter()
         start_time = time.perf_counter()
         while ((sample_counter < max_samples) and (sample_counter < max_sample_time)):
             result = self.read_rdatac_response()
             end_time = time.perf_counter()
             sample_counter += 1
+            progress.update(1)
             if self.mode == 2:  # MessagePack mode
                 samples.append(result)
             else:
@@ -1159,6 +1165,8 @@ class HackEEGBoard:
             # optional display of samples
             if display_output:
                 print(samples[-1])
+
+        progress.close()
 
         dur = end_time - start_time
         self.stop_and_sdatac_messagepack()
@@ -1276,7 +1284,7 @@ class HackEEGBoard:
 
         # Single-ended mode - setting SRB1 bit sends mid-supply voltage to the N inputs
         # use this with a signal generator
-        self.wreg(ads1299.MISC1, ads1299.SRB1)
+        # self.wreg(ads1299.MISC1, ads1299.SRB1)
 
         # Dual-ended mode
         # self.wreg(ads1299.MISC1, ads1299.MISC1_const)
@@ -1412,7 +1420,7 @@ def process_df(df, sample_counter, duration, scale=1e-3, gain=1):
 
     return df
 
-def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_second=None, gain=1, process_df=True, save2parquet=True,             save2csv=True,
+def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_second=None, gain=1, process_data=True, save2parquet=True,             save2csv=True,
                 find_dropped_samples=False, out_df=False, scale=1e-3, debug=False, channel_test=False, filepath=None):
     """
     Perform data scan using the HackEEG board and close the serial port when finished.
@@ -1431,7 +1439,7 @@ def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_seco
         gain (int, optional):
             The gain to use for the acquisition. Defaults to 1.
             Options are: 1, 2, 4, 6, 8, 12, 24.
-        process_df (bool, optional):
+        process_data (bool, optional):
             Whether to process the DataFrame. Defaults to True.
         save2parquet (bool, optional):
             Whether to save the DataFrame to a parquet file. Defaults to True.
@@ -1455,12 +1463,10 @@ def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_seco
     try:
         if hackeeg is None:
             hackeeg = HackEEGBoard(debug=debug)
-        if out_df:
-            df = hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
-                    find_dropped_samples, out_df, scale, debug, channel_test, filepath)
-        else:
-            hackeeg.scan(max_samples, duration, samples_per_second, gain, process_df, save2parquet, save2csv,
-                        find_dropped_samples, out_df, scale, debug, channel_test, filepath)
+
+        df = hackeeg.scan(max_samples, duration, samples_per_second, gain, process_data, save2parquet, save2csv,
+                            find_dropped_samples, out_df, scale, debug, channel_test, filepath)
+
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
