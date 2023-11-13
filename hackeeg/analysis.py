@@ -13,8 +13,8 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-# import scienceplots
-from scipy.fftpack import fft
+import scienceplots
+from scipy.fftpack import fft, fftfreq
 from scipy import signal
 import pandas as pd
 
@@ -27,7 +27,58 @@ from hackeeg.multi_melt import multi_melt
 
 # TODO: use lineplot/seaborn for quick_fftplot using groupby
 
-def quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization=None):
+def quickplot(df, x='sample_number', y='voltage', kind='line', style='ch', normalization=None):
+    """
+    Create a plot using Pandas plot with the given dataframe and parameters.
+
+    Parameters:
+    df: pandas.DataFrame
+        The dataframe to be plotted.
+    x: str
+        The column name to be used as the x-axis. Default is 'sample_number'.
+    y: str
+        The column name to be used as the y-axis. Default is 'voltage'.
+    kind: str
+        The kind of plot to produce:
+            'line' : line plot (default)
+            'bar' : vertical bar plot
+            'barh' : horizontal bar plot
+            'hist' : histogram
+            'box' : boxplot
+            'kde' : Kernel Density Estimation plot
+            'density' : same as 'kde'
+            'area' : area plot
+            'pie' : pie plot
+            'scatter' : scatter plot (DataFrame only)
+            'hexbin' : hexbin plot (DataFrame only)
+    style: str
+        The column name to be used for marker style encoding. Default is 'ch'.
+    normalization: {'minmax', 'zscore', None}
+        The normalization method to be applied to the y-axis. Default is None.
+
+    Returns:
+    ax (matplotlib.axes._subplots.AxesSubplot): The resulting scatterplot.
+    """
+
+    if 'loff_statn' in df.columns:
+        df = extract_data_from_df(df, errors='ignore')
+    df = wide2long_eeg(df, value_vars_primitives=['ch','raw_ch'], value_names=['voltage','raw_voltage'],
+                    id_vars = ['timestamp', 'sample_number', 'total_samples', 'total_duration', 'avg_sample_rate',
+                        'gain', 'ch_unit', 'num_chs'],
+                    rename_ch2int=True)
+
+    if normalization is not None:
+        df = normalize(df, column=y, method=normalization)
+
+    # ax = sns.lineplot(data=df, x=x, y=y, hue=hue, legend='full')
+    # ax.set(xlabel='sample number', ylabel='voltage (mV)')
+    # sns.move_legend(ax, "center right", bbox_to_anchor=(1.15, 0.5), ncol=1)
+
+    ax = df.plot(x=x,y=y, kind=kind, style=style, xlabel='sample number', ylabel='voltage (mV)', legend=True, ).legend(loc='best')
+
+    return ax
+
+def quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization=None, palette='colorblind'):
     """
     Creates a scatterplot using Seaborn library with the given dataframe and parameters.
 
@@ -59,13 +110,15 @@ def quick_scatterplot(df, x='sample_number', y='voltage', hue='ch', style='ch', 
     if normalization is not None:
         df = normalize(df, column=y, method=normalization)
 
-    ax = sns.scatterplot(data=df, x=x, y=y, hue=hue, legend='full')
+    ax = sns.scatterplot(data=df, x=x, y=y, hue=hue, legend='full', palette=palette)
     ax.set(xlabel='sample number', ylabel='voltage (mV)')
-    sns.move_legend(ax, "center right", bbox_to_anchor=(1.15, 0.5), ncol=1)
+    sns.move_legend(ax, "center right", bbox_to_anchor=(1.18, 0.5), ncol=1)
+
+    # ax = df.plot(x=x,y=y,legend=True, kind='scatter', xlabel='sample number', ylabel='voltage (mV)').legend(loc='best')
 
     return ax
 
-def quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization=None):
+def quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', normalization=None, palette='colorblind'):
     """
     Plots a line plot of the given dataframe with the specified parameters.
 
@@ -97,13 +150,15 @@ def quick_lineplot(df, x='sample_number', y='voltage', hue='ch', style='ch', nor
     if normalization is not None:
         df = normalize(df, column=y, method=normalization)
 
-    ax = sns.lineplot(data=df, x=x, y=y, hue=hue, legend='full')
+    ax = sns.lineplot(data=df, x=x, y=y, hue=hue, legend='full', palette=palette)
     ax.set(xlabel='sample number', ylabel='voltage (mV)')
-    sns.move_legend(ax, "center right", bbox_to_anchor=(1.15, 0.5), ncol=1)
+    sns.move_legend(ax, "center right", bbox_to_anchor=(1.18, 0.5), ncol=1)
+
+    # ax = df.plot(x=x,y=y,legend=True, kind='line', xlabel='sample number', ylabel='voltage (mV)').legend(loc='best').legend(loc='best')
 
     return ax
 
-def quick_fftplot(df, scale='dB', normalization=None, xlim=1000):
+def quick_fftplot(df, scale='dB', normalization=None, xlim=1000, logx=False, logy=False, loglog=False):
     """
     Plots the Fast Fourier Transform (FFT) of the input DataFrame.
 
@@ -135,13 +190,15 @@ def quick_fftplot(df, scale='dB', normalization=None, xlim=1000):
 
     # Number of sample points
     N = df.sample_number.max()
+    # N = df.total_samples.max()
     # sample spacing
     T = 1.0 / N
 
     plt.figure(figsize=(20,10))
     for i in df.ch.unique():
         yf = fft(df.loc[df.ch.eq(i), 'voltage'].values)
-        xf = np.linspace(0.0, 1.0/(2.0*T), N//2)
+        # xf = np.linspace(0.0, 1.0, N//2) *2.0*T
+        xf = fftfreq(N, T)[:N//2]
         if scale == 'dB' or scale == 'db' or scale == 'DB':
             plt.plot(xf, 2.0/N * 20*np.log10(np.abs(yf[0:N//2])), label=f'ch{i:02d}')
         elif isinstance(scale, (int, float, complex)):
@@ -151,13 +208,19 @@ def quick_fftplot(df, scale='dB', normalization=None, xlim=1000):
     plt.grid()
     plt.title('FFT')
     plt.xlabel('frequency (Hz)')
+    if logx or loglog:
+        plt.xscale('log')
+    if logy or loglog:
+        plt.yscale('log')
     if scale == 'dB' or scale == 'db' or scale == 'DB':
         plt.ylabel('Power (dB)')
     else:
         plt.ylabel('amplitude (mV)')
-    plt.legend(loc='center right', bbox_to_anchor=(1.15, 0.5), ncol=1)
+    plt.legend(loc='center right', bbox_to_anchor=(1.1, 0.5), ncol=1)
+    # plt.legend(loc='best')
     if isinstance(xlim, (int, float, complex)):
         plt.xlim(0, xlim)
+        plt.autoscale(enable=True, axis='x', tight=True)
         plt.autoscale(enable=True, axis='y', tight=True)
     else:
         plt.autoscale(enable=True, tight=True)
@@ -259,6 +322,8 @@ def normalize(df, column='voltage', method='minmax'):
     """
     Normalizes the voltage data in a HackEEG DataFrame.
 
+    Uses answer by w-m from: https://stackoverflow.com/a/50296722
+
     Args:
         df: pandas.DataFrame
             The DataFrame to normalize.
@@ -274,11 +339,20 @@ def normalize(df, column='voltage', method='minmax'):
                         'gain', 'ch_unit', 'num_chs'],
                     rename_ch2int=True)
     if method == 'minmax':
-        return df.groupby(id_vars + ['ch']).apply(lambda x: (x[column] - x[column].min()) / (x[column].max() - x[column].min())).reset_index()
+        # return df.groupby(id_vars + ['ch']).apply(lambda x: (x[column] - x[column].min()) / (x[column].max() - x[column].min())).reset_index()
+        groups = df.loc[:,['ch'] + value_names].groupby('ch')
+        minimun, maximum = groups.transform("min"), groups.transform("max")
+        normalized = (df[minimun.columns] - minimun) / (maximun - minimun)
+        return normalized
     elif method == 'zscore':
-        return df.groupby('ch').apply(lambda x: (x[column] - x[column].mean()) / x[column].std()).reset_index()
+        # return df.groupby('ch').apply(lambda x: (x[column] - x[column].mean()) / x[column].std()).reset_index()
+        groups = df.loc[:,['ch'] + value_names].groupby('ch')
+        mean, std = groups.transform("mean"), groups.transform("std")
+        normalized = (df[mean.columns] - mean) / std
+        return normalized
     else:
         print('Unrecognized normalization method. Please use either "minmax" or "zscore".')
+        return df
 
 def check_if_wide(df):
     """

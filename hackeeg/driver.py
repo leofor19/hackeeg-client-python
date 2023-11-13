@@ -25,7 +25,7 @@ Main operation is through the HackEEGBoard class. The main command is scan, whic
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
-        print('Port Closed')
+        tqdm.write('Port Closed')
     ```
 
     or
@@ -105,10 +105,6 @@ import serial.tools.list_ports
 from tqdm.autonotebook import tqdm
 
 from . import ads1299
-
-# TODO
-# - MessagePack
-# - MessagePack / Json Lines testing convenience functions
 
 NUMBER_OF_SAMPLES = 100000
 DEFAULT_BAUDRATE = 115200
@@ -278,8 +274,8 @@ class HackEEGBoard:
             self.serial_port_path = serial_port_path
         self.raw_serial_port = serial.serial_for_url(self.serial_port_path, baudrate=self.baudrate, timeout=ConnectionSleepTime)
         if self.debug:
-            print('Connected to Serial Port:')
-            print(self.raw_serial_port)
+            tqdm.write('Connected to Serial Port:')
+            tqdm.write(self.raw_serial_port)
         self.raw_serial_port.reset_input_buffer()
         self.raw_serial_port.reset_output_buffer()
         self.serial_port= self.raw_serial_port
@@ -305,14 +301,14 @@ class HackEEGBoard:
                     break
                 except JSONDecodeError:
                     if attempts == 0:
-                        print("Connecting...", end='')
+                        tqdm.write("Connecting...", end='')
                     elif attempts > 0:
-                        print('.', end='')
+                        tqdm.write('.', end='')
                     sys.stdout.flush()
                     attempts += 1
                     time.sleep(self.ConnectionSleepTime)
             if attempts > 0:
-                print()
+                tqdm.write()
             if not connected:
                 raise HackEEGException("Can't connect to Arduino")
         self.sdatac()
@@ -369,7 +365,7 @@ class HackEEGBoard:
         """
         message = self.message_pack_unpacker.unpack()
         if self.debug:
-            print(f"message: {message}")
+            tqdm.write(f"message: {message}")
         return message
 
     def _decode_data(self, response):
@@ -386,7 +382,7 @@ class HackEEGBoard:
         """
         error = False
         if (not self.quiet) or (self.debug):
-            print(response)
+            tqdm.write(response)
         if response:
             # if isinstance(response, dict):
             try:
@@ -404,7 +400,7 @@ class HackEEGBoard:
                 try:
                     data = base64.b64decode(data)
                 except binascii.Error:
-                    print(f"incorrect padding: {data}")
+                    tqdm.write(f"incorrect padding: {data}")
                 except TypeError:
                     # keep data as is
                     pass
@@ -415,7 +411,7 @@ class HackEEGBoard:
                     # data = bytearray(data)
                     data_hex = ":".join("{:02x}".format(c) for c in data)
                     if error:
-                        print(data_hex)
+                        tqdm.write(data_hex)
                     timestamp = int.from_bytes(data[0:4], byteorder='little')
                     sample_number = int.from_bytes(data[4:8], byteorder='little')
                     ads_status = int.from_bytes(data[8:11], byteorder='big')
@@ -474,40 +470,99 @@ class HackEEGBoard:
         except JSONDecodeError:
             response_obj = None
         if self.debug:
-            print(f"read_response line: {message}")
+            tqdm.write(f"read_response line: {message}")
         if self.debug:
-            print("json response:")
-            print(self.format_json(response_obj))
+            tqdm.write("json response:")
+            tqdm.write(self.format_json(response_obj))
         return self._decode_data(response_obj)
 
     def read_rdatac_response(self):
         """Read a response from the Arduino in either JSON Lines or MessagePack modes."""
         if self.mode == self.MessagePackMode:
-            buffer = self._serial_read_messagepack_message()
-            while isinstance(buffer, int):
-                # this routine flushes the buffer of any non-messagepack data
-                buffer = self._serial_read_messagepack_message()
+            buffer = self.flush_buffer()
             response_obj = buffer
         else:
             buffer = self._serial_readline()
             while isinstance(buffer, int):
                 # this routine flushes the buffer of any non-JSONlines data
-                buffer = self._serial_read_messagepack_message()
+                buffer = self._serial_readline()
             message = buffer
             try:
                 response_obj = json.loads(message)
             except JSONDecodeError:
                 response_obj = {}
-                print()
-                print(f"json decode error: {message}")
+                tqdm.write()
+                tqdm.write(f"json decode error: {message}")
         if self.debug:
-            print(f"read_response obj: {response_obj}")
+            tqdm.write(f"read_response obj: {response_obj}")
         result = None
         try:
             result = self._decode_data(response_obj)
         except AttributeError:
             pass
         return result
+
+    # def read_rdatac_response(self):
+    #     """Read a response from the Arduino in either JSON Lines or MessagePack modes."""
+    #     if self.mode == self.MessagePackMode:
+    #         buffer = self._serial_read_messagepack_message()
+    #         response_obj = buffer
+    #     else:
+    #         buffer = self._serial_readline()
+    #         while isinstance(buffer, int):
+    #             # this routine flushes the buffer of any non-JSONlines data
+    #             buffer = self._serial_readline()
+    #         message = buffer
+    #         try:
+    #             response_obj = json.loads(message)
+    #         except JSONDecodeError:
+    #             response_obj = {}
+    #             tqdm.write()
+    #             tqdm.write(f"json decode error: {message}")
+    #     if self.debug:
+    #         tqdm.write(f"read_response obj: {response_obj}")
+    #     result = None
+    #     try:
+    #         result = self._decode_data(response_obj)
+    #     except AttributeError:
+    #         pass
+    #     return result
+
+    def flush_buffer(self, timeout=10, flushing_levels=3):
+        if self.mode == self.MessagePackMode:
+            start = time.perf_counter()
+            dur = 0
+            buffer = self._serial_read_messagepack_message()
+            try:
+                while isinstance(buffer, int) and (dur <= timeout):
+                    # this routine flushes the buffer of any non-messagepack data
+                    buffer = self.raw_serial_port.read_all()
+                    buffer = self._serial_read_messagepack_message()
+                    dur = time.perf_counter() - start
+
+                    # if dur >= timeout:
+                if isinstance(buffer, int) and (flushing_levels > 1):
+                    tqdm.write('Flushing taking too long. Attempting to stop and restart sdatac.')
+                    self.stop_and_sdatac_messagepack()
+                    self.sdatac()
+                    time.sleep(1)
+                    # self.rdatac()
+                    start2 = time.perf_counter()
+                    while isinstance(buffer, int) and (dur <= timeout):
+                        buffer = self._serial_read_messagepack_message()
+                        dur = time.perf_counter() - start2
+                if isinstance(buffer, int):
+                    raise HackEEGException('Flushing buffer failed. Please try again.')
+            except HackEEGException as error:
+                tqdm.write(f'Flushing buffer failed. Please try again. Last message received: {buffer}')
+                raise
+
+        else:
+            buffer = self._serial_readline()
+            while isinstance(buffer, int):
+                # this routine flushes the buffer of any non-JSONlines data
+                buffer = self._serial_readline()
+        return buffer
 
     def format_json(self, json_obj):
         """
@@ -533,13 +588,13 @@ class HackEEGBoard:
             None
         """
         if self.debug:
-            print(f"command: {command}  parameters: {parameters}")
+            tqdm.write(f"command: {command}  parameters: {parameters}")
         # commands are only sent in JSON Lines mode
         new_command_obj = {self.CommandKey: command, self.ParametersKey: parameters}
         new_command = str(json.dumps(new_command_obj)) # EXTREMELY IMPORTANT: convert to string, otherwise does not work
         if self.debug:
-            print("json command:")
-            print(self.format_json(new_command_obj))
+            tqdm.write("json command:")
+            tqdm.write(self.format_json(new_command_obj))
         self._serial_write(new_command)
         self._serial_write('\n')
 
@@ -923,20 +978,20 @@ class HackEEGBoard:
                     loff_statn = result.get('loff_statn')
                     channel_data = result.get('channel_data')
                     data_hex = result.get('data_hex')
-                    print(
+                    tqdm.write(
                         f"timestamp:{timestamp} sample_number: {sample_number}| gpio:{ads_gpio} loff_statp:{loff_statp} loff_statn:{loff_statn}   ",
                         end='')
                     if outhex:
-                        print(data_hex)
+                        tqdm.write(data_hex)
                     for channel_number, sample in enumerate(channel_data):
-                        print(f"{channel_number + 1}:{sample} ", end='')
-                    print()
+                        tqdm.write(f"{channel_number + 1}:{sample} ", end='')
+                    tqdm.write()
             else:
                 if not self.quiet:
-                    print(data)
+                    tqdm.write(data)
         else:
-            print("no data to decode")
-            print(f"result: {result}")
+            tqdm.write("no data to decode")
+            tqdm.write(f"result: {result}")
 
     def save2csv(self, data, filepath=None):
         """
@@ -1041,6 +1096,11 @@ class HackEEGBoard:
 
         self.setup(samples_per_second=samples_per_second, gain=gain, messagepack=True, channel_test=channel_test)
 
+        self.stop_and_sdatac_messagepack()
+        self.sdatac()
+
+        time.sleep(1)
+
         samples, sample_counter, dur = self.acquire_data(max_samples, duration, samples_per_second)
 
         if find_dropped_samples:
@@ -1055,11 +1115,11 @@ class HackEEGBoard:
         if save2parquet:
             self.save2parquet(df, filepath=filepath)
 
-        print(f"duration in seconds: {dur}")
+        tqdm.write(f"duration in seconds: {dur}")
         samples_per_second = sample_counter / dur
-        print(f"samples per second: {samples_per_second}")
+        tqdm.write(f"samples per second: {samples_per_second}")
         if find_dropped_samples:
-            print(f"dropped samples: {dropped_samples}")
+            tqdm.write(f"dropped samples: {dropped_samples}")
         self.reset()
         self.blink_board_led()
         if out_df:
@@ -1109,7 +1169,7 @@ class HackEEGBoard:
         finally:
             # routine to properly close serial port
             self.raw_serial_port.close()
-            print('Port Closed')
+            tqdm.write('Port Closed')
             if out_df:
                 return df
 
@@ -1145,9 +1205,10 @@ class HackEEGBoard:
 
         self.rdatac()
 
-        progress = tqdm(total = max_sample_time, miniters=100)
+        progress = tqdm(total = max_sample_time, miniters=1)
         tqdm.write("Flushing buffer...")
         result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
+        # result = self.flush_buffer()
 
         tqdm.write("Acquiring data...")
         end_time = time.perf_counter()
@@ -1164,14 +1225,15 @@ class HackEEGBoard:
 
             # optional display of samples
             if display_output:
-                print(samples[-1])
+                tqdm.write(samples[-1])
 
         progress.close()
+        tqdm.write(f'Buffer size: {len(result)}')
 
         dur = end_time - start_time
         self.stop_and_sdatac_messagepack()
 
-        return samples,sample_counter,dur
+        return samples, sample_counter, dur
 
     def find_dropped_samples(self, samples, number_of_samples):
         """
@@ -1470,6 +1532,6 @@ def hackeeg_scan(hackeeg=None, max_samples=None, duration=None, samples_per_seco
     finally:
         # routine to properly close serial port
         hackeeg.raw_serial_port.close()
-        print('Port Closed')
+        tqdm.write('Port Closed')
         if out_df:
             return df
