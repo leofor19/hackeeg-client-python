@@ -275,7 +275,7 @@ class HackEEGBoard:
         self.raw_serial_port = serial.serial_for_url(self.serial_port_path, baudrate=self.baudrate, timeout=ConnectionSleepTime)
         if self.debug:
             tqdm.write('Connected to Serial Port:')
-            tqdm.write(self.raw_serial_port)
+            tqdm.write(str(self.raw_serial_port))
         self.raw_serial_port.reset_input_buffer()
         self.raw_serial_port.reset_output_buffer()
         self.serial_port= self.raw_serial_port
@@ -363,7 +363,10 @@ class HackEEGBoard:
         Returns:
         - message (bytes): The message read from the serial port.
         """
-        message = self.message_pack_unpacker.unpack()
+        try:
+            message = self.message_pack_unpacker.unpack()
+        except (UnicodeDecodeError, ValueError):
+            message = self.message_pack_unpacker.unpack() # tries again
         if self.debug:
             tqdm.write(f"message: {message}")
         return message
@@ -382,20 +385,14 @@ class HackEEGBoard:
         """
         error = False
         if (not self.quiet) or (self.debug):
-            tqdm.write(response)
+            tqdm.write(str(response))
         if response:
-            # if isinstance(response, dict):
             try:
                 data = response.get(self.DataKey)
             except (AttributeError, KeyError):
                 data = response
             if data is None:
                 data = response.get(self.MpDataKey)
-                # if data:
-                    # data = bytearray(data)
-            # if type(data) is str:
-            # if isinstance(data, str) or isinstance(data, bytes):
-            # if self._isBase64(data):
             if isinstance(data, str):
                 try:
                     data = base64.b64decode(data)
@@ -404,11 +401,8 @@ class HackEEGBoard:
                 except TypeError:
                     # keep data as is
                     pass
-            # if data and (type(data) is list) or (type(data) is bytes):
-            # if data and (isinstance(data, list) or isinstance(data, bytes)):
             if data:
                 try:
-                    # data = bytearray(data)
                     data_hex = ":".join("{:02x}".format(c) for c in data)
                     if error:
                         tqdm.write(data_hex)
@@ -436,7 +430,7 @@ class HackEEGBoard:
                     response['channel_data'] = channel_data
                     response['data_hex'] = data_hex
                     response['data_raw'] = data
-                except (UnicodeDecodeError, AttributeError, TypeError):
+                except (UnicodeDecodeError, AttributeError, TypeError, ValueError):
                     response = data
         return response
 
@@ -498,8 +492,14 @@ class HackEEGBoard:
         result = None
         try:
             result = self._decode_data(response_obj)
-        except AttributeError:
-            pass
+        # except (UnicodeDecodeError, AttributeError, TypeError):
+        #     pass
+        except (UnicodeDecodeError, AttributeError, TypeError):
+            try:
+                response_obj = self.flush_buffer(timeout=0.1, flushing_levels=1) # attempts to reflush buffer
+                result = self._decode_data(response_obj)
+            except (UnicodeDecodeError, AttributeError, TypeError):
+                result = response_obj
         return result
 
     # def read_rdatac_response(self):
@@ -528,7 +528,20 @@ class HackEEGBoard:
     #         pass
     #     return result
 
-    def flush_buffer(self, timeout=10, flushing_levels=3):
+    def flush_buffer(self, timeout=2, flushing_levels=3):
+        """
+        Flushes the buffer of any non-messagepack or non-JSONlines data.
+
+        Args:
+            timeout (int, optional): The maximum time to wait for flushing to complete, in seconds. Defaults to 2.
+            flushing_levels (int, optional): The number of times to attempt flushing before raising an exception. Defaults to 3.
+
+        Raises:
+            HackEEGException: If flushing the buffer fails after the specified number of attempts.
+
+        Returns:
+            The flushed buffer.
+        """
         if self.mode == self.MessagePackMode:
             start = time.perf_counter()
             dur = 0
@@ -536,21 +549,22 @@ class HackEEGBoard:
             try:
                 while isinstance(buffer, int) and (dur <= timeout):
                     # this routine flushes the buffer of any non-messagepack data
-                    buffer = self.raw_serial_port.read_all()
+                    # buffer = self.raw_serial_port.read_all()
                     buffer = self._serial_read_messagepack_message()
                     dur = time.perf_counter() - start
 
                     # if dur >= timeout:
                 if isinstance(buffer, int) and (flushing_levels > 1):
-                    tqdm.write('Flushing taking too long. Attempting to stop and restart sdatac.')
-                    self.stop_and_sdatac_messagepack()
-                    self.sdatac()
-                    time.sleep(1)
-                    # self.rdatac()
-                    start2 = time.perf_counter()
-                    while isinstance(buffer, int) and (dur <= timeout):
-                        buffer = self._serial_read_messagepack_message()
-                        dur = time.perf_counter() - start2
+                    for flush in np.arange(2, flushing_levels + 1):
+                        tqdm.write(f'Flushing taking too long. Attempting to stop and restart sdatac. Flush attempt: {flush}')
+                        self.stop_and_sdatac_messagepack()
+                        self.sdatac()
+                        time.sleep(1)
+                        # self.rdatac()
+                        start2 = time.perf_counter()
+                        while isinstance(buffer, int) and (dur <= timeout):
+                            buffer = self._serial_read_messagepack_message()
+                            dur = time.perf_counter() - start2
                 if isinstance(buffer, int):
                     raise HackEEGException('Flushing buffer failed. Please try again.')
             except HackEEGException as error:
@@ -558,10 +572,31 @@ class HackEEGBoard:
                 raise
 
         else:
+            start = time.perf_counter()
+            dur = 0
             buffer = self._serial_readline()
-            while isinstance(buffer, int):
-                # this routine flushes the buffer of any non-JSONlines data
-                buffer = self._serial_readline()
+            try:
+                while isinstance(buffer, int) and (dur <= timeout):
+                    # this routine flushes the buffer of any non-JSONlines data
+                    buffer = self._serial_readline()
+                    dur = time.perf_counter() - start
+                if isinstance(buffer, int) and (flushing_levels > 1):
+                    for flush in np.arange(2, flushing_levels + 1):
+                        tqdm.write(f'Flushing taking too long. Attempting to stop and restart sdatac. Flush attempt: {flush}')
+                        self.stop()
+                        self.sdatac()
+                        time.sleep(1)
+                        # self.rdatac()
+                        start2 = time.perf_counter()
+                        while isinstance(buffer, int) and (dur <= timeout):
+                            buffer = self._serial_readline()
+                            dur = time.perf_counter() - start2
+                if isinstance(buffer, int):
+                        raise HackEEGException('Flushing buffer failed. Please try again.')
+            except HackEEGException as error:
+                tqdm.write(f'Flushing buffer failed. Please try again. Last message received: {buffer}')
+                raise
+
         return buffer
 
     def format_json(self, json_obj):
@@ -1207,6 +1242,7 @@ class HackEEGBoard:
 
         progress = tqdm(total = max_sample_time, miniters=1)
         tqdm.write("Flushing buffer...")
+        result = self.raw_serial_port.read_all() # initial data read_all
         result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
         # result = self.flush_buffer()
 
