@@ -39,16 +39,20 @@ DEFAULT_NUMBER_OF_SAMPLES_TO_CAPTURE = 100000
 
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_data'))
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_baseline-0-1-10-0-02'))
-# filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_noise-0-0-00-0-03'))
+# filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_noise-0-0-00-0-05'))
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-A-2-10-02'))
 
-filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-D-2-10-02'))
+# filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-D-2-10-02'))
+
+# filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-B-2-10-02'))
+
+filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_experiment_1-G-2-10-02'))
 
 # filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), '_dry_test_00-01'))
 
 # hackeeg_scan(duration=1, samples_per_second=250)
 # hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=True, debug=True)
-df = hackeeg.hackeeg_scan(duration=1, samples_per_second=2000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
+df = hackeeg.hackeeg_scan(duration=1, samples_per_second=4000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
 # df = hackeeg.hackeeg_scan(duration=1, samples_per_second=16000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
 # df = hackeeg.hackeeg_scan(duration=1, samples_per_second=1000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True)
 

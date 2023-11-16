@@ -107,7 +107,9 @@ from tqdm.autonotebook import tqdm
 from . import ads1299
 
 NUMBER_OF_SAMPLES = 100000
-DEFAULT_BAUDRATE = 115200
+# DEFAULT_BAUDRATE = 115200
+DEFAULT_BAUDRATE = 2000000
+# DEFAULT_BAUDRATE = 1000000
 SAMPLE_LENGTH_IN_BYTES = 38  # 216 bits encoded with base64 + '\r\n\'
 
 SPEEDS = {250: ads1299.HIGH_RES_250_SPS,
@@ -226,7 +228,7 @@ class HackEEGBoard:
     ConnectionSleepTime = 0.1
 
     def __init__(self, serial_port_path=None, baudrate=DEFAULT_BAUDRATE, debug=False, quiet=True,
-                    max_samples=100000, duration=1, target_mode=2, samples_per_second=16000, MaxConnectionAttempts=10, ConnectionSleepTime=0.1):
+                    max_samples=1000000, duration=1, target_mode=2, samples_per_second=16000, MaxConnectionAttempts=10, ConnectionSleepTime=0.1):
         """
         Initializes the HackEEG Driver class.
 
@@ -241,7 +243,7 @@ class HackEEGBoard:
         quiet : bool, optional
             Whether to suppress output, by default True
         max_samples : int, optional
-            The maximum number of samples to collect, by default 100000
+            The maximum number of samples to collect, by default 1000000
         duration : int, optional
             The duration of the recording in seconds, by default 1
         target_mode : int, optional
@@ -273,12 +275,14 @@ class HackEEGBoard:
         else:
             self.serial_port_path = serial_port_path
         self.raw_serial_port = serial.serial_for_url(self.serial_port_path, baudrate=self.baudrate, timeout=ConnectionSleepTime)
+        self.raw_serial_port.set_buffer_size(rx_size = 12800, tx_size = 12800)
         if self.debug:
             tqdm.write('Connected to Serial Port:')
             tqdm.write(str(self.raw_serial_port))
         self.raw_serial_port.reset_input_buffer()
         self.raw_serial_port.reset_output_buffer()
         self.serial_port= self.raw_serial_port
+        # self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False, read_size=1000*1024)
         self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False)
         self.connect()
 
@@ -347,10 +351,12 @@ class HackEEGBoard:
         """
         if serial_port is None:
             line = self.serial_port.readline()
+            # line = self.serial_port.read(SAMPLE_LENGTH_IN_BYTES)
         elif serial_port == "raw":
             # line = self.raw_serial_port.readline().decode()
             # line = self.raw_serial_port.readline().decode(errors='replace')
             line = self.raw_serial_port.readline().decode(errors='ignore')
+            # line = self.raw_serial_port.read(SAMPLE_LENGTH_IN_BYTES).decode(errors='ignore')
             # line = self.raw_serial_port.readline()
         else:
             raise HackEEGException('Unknown serial port designator; must be either None or "raw"')
@@ -363,10 +369,15 @@ class HackEEGBoard:
         Returns:
         - message (bytes): The message read from the serial port.
         """
-        try:
-            message = self.message_pack_unpacker.unpack()
-        except (UnicodeDecodeError, ValueError):
-            message = self.message_pack_unpacker.unpack() # tries again
+        # try:
+        message = self.message_pack_unpacker.unpack()
+        # message = self.message_pack_unpacker.read_bytes(SAMPLE_LENGTH_IN_BYTES)
+            # message = self.message_pack_unpacker.read_bytes(32)
+        # except (UnicodeDecodeError, ValueError):
+        #     pass
+        #     message = self.message_pack_unpacker.unpack() # tries again
+        #     # message = np.nan
+        #     # message = self.message_pack_unpacker.read_bytes(32) # tries again
         if self.debug:
             tqdm.write(f"message: {message}")
         return message
@@ -473,8 +484,8 @@ class HackEEGBoard:
     def read_rdatac_response(self):
         """Read a response from the Arduino in either JSON Lines or MessagePack modes."""
         if self.mode == self.MessagePackMode:
-            buffer = self.flush_buffer()
-            response_obj = buffer
+            # buffer = self.flush_buffer()
+            response_obj = self._serial_read_messagepack_message()
         else:
             buffer = self._serial_readline()
             while isinstance(buffer, int):
@@ -489,17 +500,18 @@ class HackEEGBoard:
                 tqdm.write(f"json decode error: {message}")
         if self.debug:
             tqdm.write(f"read_response obj: {response_obj}")
-        result = None
-        try:
-            result = self._decode_data(response_obj)
+        # result = None
+        # try:
+        #     result = self._decode_data(response_obj)
+        # # except (UnicodeDecodeError, AttributeError, TypeError):
+        # #     pass
         # except (UnicodeDecodeError, AttributeError, TypeError):
-        #     pass
-        except (UnicodeDecodeError, AttributeError, TypeError):
-            try:
-                response_obj = self.flush_buffer(timeout=0.1, flushing_levels=1) # attempts to reflush buffer
-                result = self._decode_data(response_obj)
-            except (UnicodeDecodeError, AttributeError, TypeError):
-                result = response_obj
+        #     try:
+        #         response_obj = self.flush_buffer(timeout=0.1, flushing_levels=1) # attempts to reflush buffer
+        #         result = self._decode_data(response_obj)
+        #     except (UnicodeDecodeError, AttributeError, TypeError):
+        #         result = response_obj
+        result = response_obj
         return result
 
     # def read_rdatac_response(self):
@@ -989,6 +1001,21 @@ class HackEEGBoard:
         except Exception:
             return False
 
+    def process_sample_batch(self, samples, outhex=False):
+        """
+        Processes a sample of data received from the EEG device.
+
+        Args:
+            result (dict): A dictionary containing the sample data.
+            samples (list): A list to which the sample will be appended.
+            outhex (bool, optional): Whether to output the sample data in hexadecimal format. Defaults to False.
+        """
+        result = []
+        for s in samples:
+            result.append(self._decode_data(s))
+
+        return result
+
     def process_sample(self, result, samples, outhex=False):
         """
         Processes a sample of data received from the EEG device.
@@ -1131,10 +1158,11 @@ class HackEEGBoard:
 
         self.setup(samples_per_second=samples_per_second, gain=gain, messagepack=True, channel_test=channel_test)
 
-        self.stop_and_sdatac_messagepack()
-        self.sdatac()
+        # self.stop_and_sdatac_messagepack()
 
-        time.sleep(1)
+        # time.sleep(1)
+        # if samples_per_second > 2000:
+        #     time.sleep(1)
 
         samples, sample_counter, dur = self.acquire_data(max_samples, duration, samples_per_second)
 
@@ -1238,13 +1266,14 @@ class HackEEGBoard:
         samples = []
         sample_counter = 0
 
+        self.sdatac()
         self.rdatac()
 
         progress = tqdm(total = max_sample_time, miniters=1)
         tqdm.write("Flushing buffer...")
-        result = self.raw_serial_port.read_all() # initial data read_all
-        result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
-        # result = self.flush_buffer()
+        # result = self.raw_serial_port.read_all() # initial data read_all
+        result = self.flush_buffer(timeout=2, flushing_levels=4)
+        # result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
 
         tqdm.write("Acquiring data...")
         end_time = time.perf_counter()
@@ -1264,10 +1293,11 @@ class HackEEGBoard:
                 tqdm.write(samples[-1])
 
         progress.close()
-        tqdm.write(f'Buffer size: {len(result)}')
+        # tqdm.write(f'Buffer size: {len(result)}')
 
         dur = end_time - start_time
         self.stop_and_sdatac_messagepack()
+        samples = self.process_sample_batch(samples)
 
         return samples, sample_counter, dur
 
