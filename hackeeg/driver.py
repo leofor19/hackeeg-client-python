@@ -87,6 +87,7 @@ ValueError
 
 import base64
 import binascii
+import ctypes
 from datetime import datetime
 import io
 import json
@@ -96,6 +97,7 @@ from pathlib import Path
 import sys
 import time
 import warnings
+# import win32com.client
 
 import msgpack
 import numpy as np
@@ -105,11 +107,15 @@ import serial.tools.list_ports
 from tqdm.autonotebook import tqdm
 
 from . import ads1299
+# from .SerialtoSocket import SerialtoSocket
+print("".join((str(Path(__file__).resolve().parents[1]), "\\build")))
+sys.path.append("".join((str(Path(__file__).resolve().parents[1]), "/build")))
+# import acquire_data_module
 
 NUMBER_OF_SAMPLES = 100000
 # DEFAULT_BAUDRATE = 115200
 DEFAULT_BAUDRATE = 2000000
-# DEFAULT_BAUDRATE = 1000000
+# DEFAULT_BAUDRATE = 4000000
 SAMPLE_LENGTH_IN_BYTES = 38  # 216 bits encoded with base64 + '\r\n\'
 
 SPEEDS = {250: ads1299.HIGH_RES_250_SPS,
@@ -228,7 +234,7 @@ class HackEEGBoard:
     ConnectionSleepTime = 0.1
 
     def __init__(self, serial_port_path=None, baudrate=DEFAULT_BAUDRATE, debug=False, quiet=True,
-                    max_samples=1000000, duration=1, target_mode=2, samples_per_second=16000, MaxConnectionAttempts=10, ConnectionSleepTime=0.1):
+                    max_samples=1000000, duration=1, target_mode=2, samples_per_second=16000, MaxConnectionAttempts=10, ConnectionSleepTime=0.01):
         """
         Initializes the HackEEG Driver class.
 
@@ -275,15 +281,23 @@ class HackEEGBoard:
         else:
             self.serial_port_path = serial_port_path
         self.raw_serial_port = serial.serial_for_url(self.serial_port_path, baudrate=self.baudrate, timeout=ConnectionSleepTime)
-        self.raw_serial_port.set_buffer_size(rx_size = 12800, tx_size = 12800)
+        # self.raw_serial_port.set_buffer_size(rx_size = 1000, tx_size = 1000)
+        # self.raw_serial_port.set_buffer_size(rx_size = 12800, tx_size = 12800)
+        # self.raw_serial_port.set_buffer_size(rx_size = 10*1024*1024, tx_size = 10*1024*1024)
         if self.debug:
             tqdm.write('Connected to Serial Port:')
             tqdm.write(str(self.raw_serial_port))
         self.raw_serial_port.reset_input_buffer()
         self.raw_serial_port.reset_output_buffer()
         self.serial_port= self.raw_serial_port
+        # self.fd = self.raw_serial_port.fileno()
+        # self.fd = SerialtoSocket(self.serial_port)
+        # get identifier of pyserial serial port on Windows:
+        if os.name == 'nt':
+            self.fd = self.raw_serial_port._port_handle
         # self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False, read_size=1000*1024)
-        self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False)
+        # self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False)
+        self.message_pack_unpacker = msgpack.Unpacker(self.raw_serial_port,  raw=False, use_list=False, read_size=38)
         self.connect()
 
     def connect(self):
@@ -485,7 +499,8 @@ class HackEEGBoard:
         """Read a response from the Arduino in either JSON Lines or MessagePack modes."""
         if self.mode == self.MessagePackMode:
             # buffer = self.flush_buffer()
-            response_obj = self._serial_read_messagepack_message()
+            # response_obj = self._serial_read_messagepack_message()
+            response_obj = self.message_pack_unpacker.unpack()
         else:
             buffer = self._serial_readline()
             while isinstance(buffer, int):
@@ -571,15 +586,17 @@ class HackEEGBoard:
                         tqdm.write(f'Flushing taking too long. Attempting to stop and restart sdatac. Flush attempt: {flush}')
                         self.stop_and_sdatac_messagepack()
                         self.sdatac()
-                        time.sleep(1)
+                        time.sleep(0.1)
                         # self.rdatac()
                         start2 = time.perf_counter()
                         while isinstance(buffer, int) and (dur <= timeout):
                             buffer = self._serial_read_messagepack_message()
                             dur = time.perf_counter() - start2
                 if isinstance(buffer, int):
-                    raise HackEEGException('Flushing buffer failed. Please try again.')
-            except HackEEGException as error:
+                    raise HackEEGException('Buffer flushing failed. Please try again.')
+                else:
+                    tqdm.write(f'Buffer flushing successful. Last message received: {buffer}')
+            except HackEEGException:
                 tqdm.write(f'Flushing buffer failed. Please try again. Last message received: {buffer}')
                 raise
 
@@ -605,6 +622,8 @@ class HackEEGBoard:
                             dur = time.perf_counter() - start2
                 if isinstance(buffer, int):
                         raise HackEEGException('Flushing buffer failed. Please try again.')
+                else:
+                    tqdm.write(f'Buffer flushing successful. Last message received: {buffer}')
             except HackEEGException as error:
                 tqdm.write(f'Flushing buffer failed. Please try again. Last message received: {buffer}')
                 raise
@@ -1290,7 +1309,7 @@ class HackEEGBoard:
 
             # optional display of samples
             if display_output:
-                tqdm.write(samples[-1])
+                tqdm.write(str(samples[-1]))
 
         progress.close()
         # tqdm.write(f'Buffer size: {len(result)}')
@@ -1300,6 +1319,72 @@ class HackEEGBoard:
         samples = self.process_sample_batch(samples)
 
         return samples, sample_counter, dur
+
+    # def acquire_data(self, max_samples, duration, speed, display_output=False):
+    #     """
+    #     Acquires continuous data stream from the HackEEG device.
+
+    #     Args:
+    #         max_samples (int): The maximum number of samples to acquire.
+    #         duration (float): The duration of the acquisition in seconds.
+    #         speed (int): The sampling rate in Hz (or sps).
+    #         display_output (bool, optional): Whether to display the acquired samples. Defaults to False.
+
+    #     Returns:
+    #         Tuple: A tuple containing the acquired samples, the number of samples acquired, and the duration of the acquisition.
+    #     """
+
+    #     if max_samples is None:
+    #         max_samples = self.max_samples
+
+    #     if duration is None:
+    #         duration = self.duration
+
+    #     if speed is None:
+    #         speed = self.speed
+
+    #     max_sample_time = duration * speed
+
+    #     # self.start()
+
+    #     samples = []
+    #     sample_counter = 0
+
+    #     self.sdatac()
+    #     self.rdatac()
+
+    #     # progress = tqdm(total = max_sample_time, miniters=1)
+    #     tqdm.write("Flushing buffer...")
+    #     # result = self.raw_serial_port.read_all() # initial data read_all
+    #     result = self.flush_buffer(timeout=2, flushing_levels=4)
+    #     # result = self.read_rdatac_response() # initial data read to flush buffer and avoid sample miscounting
+
+    #     tqdm.write("Acquiring data...")
+    #     result = acquire_data_module.acquire_data_cpp(max_samples, duration, speed, self.fp)
+    #     # end_time = time.perf_counter()
+    #     # start_time = time.perf_counter()
+    #     # while ((sample_counter < max_samples) and (sample_counter < max_sample_time)):
+    #     #     result = self.read_rdatac_response()
+    #     #     end_time = time.perf_counter()
+    #     #     sample_counter += 1
+    #     #     progress.update(1)
+    #     #     if self.mode == 2:  # MessagePack mode
+    #     #         samples.append(result)
+    #     #     else:
+    #     #         self.process_sample(result, samples)
+
+    #     #     # optional display of samples
+    #     #     if display_output:
+    #     #         tqdm.write(str(samples[-1]))
+
+    #     # progress.close()
+    #     # tqdm.write(f'Buffer size: {len(result)}')
+
+    #     # dur = end_time - start_time
+    #     self.stop_and_sdatac_messagepack()
+    #     samples = self.process_sample_batch(samples)
+
+    #     return samples, sample_counter, dur
 
     def find_dropped_samples(self, samples, number_of_samples):
         """

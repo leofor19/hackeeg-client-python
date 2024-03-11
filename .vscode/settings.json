@@ -1,0 +1,8 @@
+{
+    "cmake.sourceDirectory": "C:/Users/leofo/OneDrive - McGill University/Documents McGill/Github/hackeeg-client-python-singleboard/hackeeg"
+}
+{
+    "cmake.configureSettings": {
+      "CMAKE_TOOLCHAIN_FILE": "[vcpkg root]/scripts/buildsystems/vcpkg.cmake"
+    }
+  }

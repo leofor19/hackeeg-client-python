@@ -48,8 +48,8 @@ filepath = "".join((str(Path(__file__).resolve().parents[1]), '/data/',  datetim
 
 # hackeeg_scan(duration=1, samples_per_second=250)
 # hackeeg.hackeeg_scan(duration=1, samples_per_second=250, channel_test=True, debug=True)
-df = hackeeg.hackeeg_scan(duration=1, samples_per_second=4000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
-# df = hackeeg.hackeeg_scan(duration=0.01, samples_per_second=2000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
+df = hackeeg.hackeeg_scan(duration=0.1, samples_per_second=8000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
+# df = hackeeg.hackeeg_scan(duration=0.01, samples_per_second=16000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
 # df = hackeeg.hackeeg_scan(duration=1, samples_per_second=1000, channel_test=False, debug=False, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
 # df = hackeeg.hackeeg_scan(duration=10/4000, samples_per_second=4000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True, find_dropped_samples=True)
 # df = hackeeg.hackeeg_scan(duration=1, samples_per_second=1000, channel_test=False, debug=True, gain=1, filepath=filepath, out_df=True)
